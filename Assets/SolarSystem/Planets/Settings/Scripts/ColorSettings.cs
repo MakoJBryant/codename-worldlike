@@ -17,5 +17,9 @@ namespace SolarSystem.Planets.Settings
         [Header("Tint")]
         public Color tintColor = Color.white;
         [Range(0, 1)] public float tintPercent = 0;
+
+        [Header("Height Range for Color Mapping")]
+        public float minHeight = 0f;
+        public float maxHeight = 1f;
     }
 }

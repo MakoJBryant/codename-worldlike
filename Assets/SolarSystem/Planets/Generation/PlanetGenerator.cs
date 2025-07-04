@@ -1,5 +1,4 @@
 using SolarSystem.Planets.Generation.Coloring;
-using SolarSystem.Planets.Generation.Noise;
 using SolarSystem.Planets.Settings;
 using UnityEngine;
 
@@ -12,7 +11,6 @@ namespace SolarSystem.Planets.Generation
     [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
     public class PlanetGenerator : MonoBehaviour
     {
-        [Header("Settings")]
         public ShapeSettings shapeSettings;
         public ColorSettings colorSettings;
 
@@ -72,9 +70,26 @@ namespace SolarSystem.Planets.Generation
             mesh = new Mesh();
             mesh.name = "Planet Mesh";
             mesh.CombineMeshes(combine, true, false);
+
+            mesh.RecalculateNormals(); // Important for correct lighting!
+
             meshFilter.sharedMesh = mesh;
 
-            mesh.RecalculateNormals();
+            AssignColors();
+        }
+
+        private void AssignColors()
+        {
+            Color[] colors = new Color[mesh.vertexCount];
+            float planetRadius = shapeSettings.radius;
+
+            for (int i = 0; i < mesh.vertexCount; i++)
+            {
+                Vector3 vertex = mesh.vertices[i];
+                colors[i] = colorGenerator.CalculateColor(vertex, planetRadius);
+            }
+
+            mesh.colors = colors;
         }
 
 #if UNITY_EDITOR
@@ -83,10 +98,9 @@ namespace SolarSystem.Planets.Generation
             if (shapeSettings == null || colorSettings == null)
                 return;
 
-            // Delay mesh generation until after validation is finished
             EditorApplication.delayCall += () =>
             {
-                if (this != null) // Check object not destroyed
+                if (this != null)
                 {
                     Initialize();
                     GeneratePlanet();
