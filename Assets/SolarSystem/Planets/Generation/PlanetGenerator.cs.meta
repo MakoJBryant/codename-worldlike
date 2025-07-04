@@ -4,8 +4,8 @@ MonoImporter:
   externalObjects: {}
   serializedVersion: 2
   defaultReferences:
-  - shapeSettings: {fileID: 11400000, guid: 0339d29562848d74686124cce015b83f, type: 2}
-  - colorSettings: {fileID: 11400000, guid: 665a416db0651024d942c2b4a8ef486c, type: 2}
+  - shapeSettings: {instanceID: 0}
+  - colorSettings: {instanceID: 0}
   executionOrder: 0
   icon: {instanceID: 0}
   userData: 
