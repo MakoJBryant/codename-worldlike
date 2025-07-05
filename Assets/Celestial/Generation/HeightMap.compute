@@ -1,0 +1,22 @@
+#pragma kernel CSMain
+
+StructuredBuffer<float3> vertices;
+RWStructuredBuffer<float> heights;
+
+uint vertexCount; // total number of vertices
+float planetRadius;
+
+[numthreads(64, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x;
+    if (index >= vertexCount)
+        return;
+
+    float3 pos = vertices[index];
+    
+    // Basic noise example
+    float noise = 0.05 * sin(pos.y * 10.0) * cos(pos.x * 15.0);
+    
+    heights[index] = planetRadius + noise;
+}
