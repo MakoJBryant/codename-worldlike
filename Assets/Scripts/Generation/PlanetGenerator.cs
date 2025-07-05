@@ -1,28 +1,25 @@
 using UnityEngine;
-using System.Collections.Generic; // Although not strictly used now, good to have for potential future lists
+using System.Collections.Generic;
 
-// [ExecuteInEditMode] allows the script to run even when the game is not playing.
-// This is incredibly useful for procedural generation as you can see changes instantly
-// when adjusting parameters in the Inspector.
 [ExecuteInEditMode]
 public class PlanetGenerator : MonoBehaviour
 {
     // --- Public Parameters - Adjustable in the Inspector ---
 
-    [Range(2, 256)] // Clamp resolution for reasonable performance in Editor
-    public int resolution = 64; // Controls the detail of the planet mesh. Higher = more detailed.
-    public float radius = 1f;   // The base radius of the planet.
+    [Range(2, 256)]
+    public int resolution = 64;
+    public float radius = 1f;
 
     [Header("Noise Settings")]
-    public float noiseStrength = 1.0f; // How much the noise displaces the terrain.
-    public float noiseRoughness = 1.0f; // Frequency of the noise. Higher = more jagged/detailed.
-    public Vector3 noiseOffset = Vector3.zero; // Offset for the noise (can be used to change patterns)
+    public float noiseStrength = 1.0f;
+    public float noiseRoughness = 1.0f;
+    public Vector3 noiseOffset = Vector3.zero;
 
     // --- Private References (Unity Components) ---
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
-    private MeshCollider meshCollider; // For physics interactions
-    private Mesh mesh; // The actual mesh data we will generate
+    private MeshCollider meshCollider;
+    private Mesh mesh;
 
     // --- Awake is called when the script instance is being loaded ---
     void Awake()
@@ -38,35 +35,68 @@ public class PlanetGenerator : MonoBehaviour
         meshCollider = GetComponent<MeshCollider>();
         if (meshCollider == null) meshCollider = gameObject.AddComponent<MeshCollider>();
 
-        // Initialize a new Mesh object.
-        mesh = new Mesh();
-        mesh.name = "Generated Planet Mesh"; // Give it a name for easier debugging
-        meshFilter.sharedMesh = mesh; // Assign the mesh to the MeshFilter
+        // Initialize a new Mesh object if it's null (e.g., first time Awake is called)
+        // or if it was cleared previously.
+        if (mesh == null)
+        {
+            mesh = new Mesh();
+            mesh.name = "Generated Planet Mesh";
+        }
 
-        // Immediately generate the planet when the game starts or in editor.
+        // Assign the mesh to the MeshFilter. This can cause SendMessage issues
+        // if done repeatedly or from OnValidate, but is fine here in Awake.
+        if (meshFilter.sharedMesh != mesh) // Only assign if different to reduce redundant calls
+        {
+            meshFilter.sharedMesh = mesh;
+        }
+
+
+        // Immediately generate the planet when the game starts or in editor's Awake.
         GeneratePlanet();
     }
 
     // --- OnValidate is called in the editor when a script is loaded or a value is changed in the Inspector ---
-    // This allows us to regenerate the planet whenever we tweak parameters.
+    // IMPORTANT: This method's content has been specifically designed to AVOID the SendMessage error.
+    // It *must not* call Awake() or GeneratePlanet() directly or indirectly.
+    // Its purpose here is minimal initialization for editor-time context,
+    // relying on Awake() for runtime and the Context Menu for editor-time generation.
     void OnValidate()
     {
-        // Ensure components are initialized before generating in OnValidate (important for Edit Mode)
-        if (meshFilter == null || meshRenderer == null || meshCollider == null || mesh == null)
+        // For immediate feedback on property changes in the editor,
+        // you should rely on the "Generate Planet Now" context menu button.
+
+        // If you need to ensure the mesh object exists for other editor-time logic (e.g., if debugging other parts
+        // of the script in the editor that rely on 'mesh' not being null), you can do a minimal check here.
+        // However, AVOID re-initializing components (like calling GetComponent or AddComponent)
+        // or assigning the mesh to meshFilter.sharedMesh here, as these trigger the SendMessage error.
+        if (mesh == null)
         {
-            Awake(); // Re-initialize components if needed (e.g., after script recompilation)
+            mesh = new Mesh();
+            mesh.name = "Generated Planet Mesh";
         }
-        else
-        {
-            GeneratePlanet();
-        }
+
+        // DO NOT uncomment or add calls to GeneratePlanet() or Awake() here.
+        // Any such calls here will reintroduce the "SendMessage" error.
     }
 
     // --- Context Menu allows right-clicking the component in the Inspector to trigger a method ---
-    [ContextMenu("Generate Planet")]
+    [ContextMenu("Generate Planet Now")]
     public void GeneratePlanet()
     {
         Debug.Log("Generating Planet with Resolution: " + resolution + ", Radius: " + radius);
+
+        // Ensure mesh and meshFilter are initialized. This is crucial for the context menu
+        // if GeneratePlanet is called before Awake has run (e.g., right after script recompile).
+        if (meshFilter == null) meshFilter = GetComponent<MeshFilter>();
+        if (meshFilter == null) { Debug.LogError("MeshFilter not found!"); return; } // Safety check
+
+        if (mesh == null)
+        {
+            mesh = new Mesh();
+            mesh.name = "Generated Planet Mesh";
+            meshFilter.sharedMesh = mesh; // Ensure the filter has the mesh if we just created it
+        }
+
 
         // Clear any previous mesh data
         mesh.Clear();
@@ -112,13 +142,21 @@ public class PlanetGenerator : MonoBehaviour
         mesh.RecalculateNormals();
 
         // Optional: Recalculate tangents if you plan to use normal maps in your shader.
-        // mesh.RecalculateTangents(); 
+        // mesh.RecalculateTangents();
 
         // Step 5: Assign the mesh to the MeshFilter (already done in Awake, but good to ensure)
+        // This line (meshFilter.sharedMesh = mesh;) is at the heart of the "SendMessage" error
+        // when called from OnValidate. It is now only called from Awake or via the Context Menu.
         meshFilter.sharedMesh = mesh;
 
         // Step 6: Assign the mesh to the MeshCollider for physics interaction.
-        meshCollider.sharedMesh = mesh;
+        // Ensure meshCollider exists before assigning to it
+        if (meshCollider == null) meshCollider = GetComponent<MeshCollider>();
+        if (meshCollider != null) // Only assign if collider is present
+        {
+            meshCollider.sharedMesh = mesh;
+        }
+
 
         Debug.Log($"PlanetGenerator: Mesh assigned. Vertices: {mesh.vertexCount}, Triangles: {mesh.triangles.Length / 3}");
     }
