@@ -1,10 +1,46 @@
 #pragma kernel CSMain
 
+struct NoiseLayerData
+{
+    uint enabled;
+    float frequency;
+    float amplitude;
+    float persistence;
+    uint octaves;
+    float3 offset;
+    float padding; // alignment
+};
+
 StructuredBuffer<float3> vertices;
 RWStructuredBuffer<float> heights;
 
-uint vertexCount; // total number of vertices
+StructuredBuffer<NoiseLayerData> noiseLayers;
+
+uint numNoiseLayers;
+uint vertexCount;
 float planetRadius;
+
+float hash(float3 p)
+{
+    return frac(sin(dot(p, float3(12.9898, 78.233, 45.164))) * 43758.5453);
+}
+
+float fbm(float3 p, NoiseLayerData layer)
+{
+    float total = 0.0;
+    float amplitude = 1.0;
+    float frequency = layer.frequency;
+
+    for (uint i = 0; i < layer.octaves; i++)
+    {
+        float3 samplePos = p * frequency + layer.offset;
+        total += hash(samplePos) * amplitude;
+        frequency *= 2.0;
+        amplitude *= layer.persistence;
+    }
+
+    return total * layer.amplitude;
+}
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
@@ -14,9 +50,16 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         return;
 
     float3 pos = vertices[index];
-    
-    // Basic noise example
-    float noise = 0.05 * sin(pos.y * 10.0) * cos(pos.x * 15.0);
-    
-    heights[index] = planetRadius + noise;
+    float height = 1.0;
+
+    for (uint i = 0; i < numNoiseLayers; i++)
+    {
+        NoiseLayerData layer = noiseLayers[i];
+        if (layer.enabled != 0)
+        {
+            height += fbm(pos, layer);
+        }
+    }
+
+    heights[index] = height * planetRadius;
 }

@@ -1,149 +1,71 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-[ExecuteInEditMode]
 public class PlanetGenerator : MonoBehaviour
 {
-    public enum PreviewMode { LOD0, LOD1, LOD2, CollisionRes }
-    public PreviewMode previewMode;
-    public ResolutionSettings resolutionSettings;
+    public ShapeSettings shapeSettings;
+    public Material baseMaterial;
 
-    public PlanetSettings planetSettings;
-    public bool logTimers;
+    public int chunkCountPerAxis = 4;
+    public float planetRadius = 10f;
+    public int baseResolution = 64;
+    public int maxLOD = 4;
+    public float lodDistanceMultiplier = 2f;
 
-    private Mesh previewMesh;
-    private MeshFilter meshFilter;
-    private MeshRenderer meshRenderer;
+    private List<PlanetChunk> chunks = new List<PlanetChunk>();
 
-    private ComputeBuffer vertexBuffer;
-    private Vector2 heightMinMax;
-
-    private static Dictionary<int, SphereMesh> sphereGenerators;
-
-    void OnEnable()
+    void Start()
     {
-        RegeneratePlanet();
+        GenerateChunks();
     }
 
-    void OnValidate()
+    void Update()
     {
-        RegeneratePlanet();
-    }
-
-    void RegeneratePlanet()
-    {
-        if (planetSettings == null || planetSettings.shape == null || planetSettings.shading == null)
+        Vector3 viewerPos = Camera.main ? Camera.main.transform.position : Vector3.zero;
+        foreach (var chunk in chunks)
         {
-            Debug.LogWarning("Missing planet settings, shape, or shading.");
-            return;
+            chunk.UpdateLOD(viewerPos);
         }
-
-        if (planetSettings.shape.heightMapCompute == null)
-        {
-            Debug.LogWarning("Missing compute shader in ShapeSettings.");
-            return;
-        }
-
-        int resolution = resolutionSettings.GetLODResolution((int)previewMode);
-        var (vertices, triangles) = CreateSphereVertsAndTris(resolution);
-
-        // Create or update structured buffer
-        ComputeHelper.CreateStructuredBuffer(ref vertexBuffer, vertices);
-
-        // Calculate heights using compute shader
-        float[] heights = planetSettings.shape.CalculateHeights(vertexBuffer);
-
-        float minH = float.PositiveInfinity;
-        float maxH = float.NegativeInfinity;
-
-        for (int i = 0; i < vertices.Length; i++)
-        {
-            float h = heights[i];
-            vertices[i] *= h;
-            minH = Mathf.Min(minH, h);
-            maxH = Mathf.Max(maxH, h);
-        }
-
-        heightMinMax = new Vector2(minH, maxH);
-        CreateMesh(ref previewMesh, vertices, triangles);
-
-        if (meshFilter == null || meshRenderer == null)
-        {
-            var meshObj = GetOrCreateMeshObject("Planet Mesh");
-            meshFilter = meshObj.GetComponent<MeshFilter>();
-            meshRenderer = meshObj.GetComponent<MeshRenderer>();
-        }
-
-        meshFilter.sharedMesh = previewMesh;
-        meshRenderer.sharedMaterial = planetSettings.shading.terrainMaterial;
-
-        ComputeHelper.Release(vertexBuffer);
-        vertexBuffer = null; // Avoid double release
     }
 
-    GameObject GetOrCreateMeshObject(string name)
+    void GenerateChunks()
     {
-        var child = transform.Find(name);
-        if (child == null)
+        // Clear old chunks
+        foreach (var c in chunks)
         {
-            GameObject go = new GameObject(name);
-            go.transform.SetParent(transform, false);
-            go.AddComponent<MeshFilter>();
-            go.AddComponent<MeshRenderer>();
-            return go;
+            if (Application.isPlaying)
+                Destroy(c.gameObject);
+            else
+                DestroyImmediate(c.gameObject);
         }
-        return child.gameObject;
-    }
+        chunks.Clear();
 
-    (Vector3[] vertices, int[] triangles) CreateSphereVertsAndTris(int res)
-    {
-        if (sphereGenerators == null)
-            sphereGenerators = new Dictionary<int, SphereMesh>();
+        float spacing = (planetRadius * 2) / chunkCountPerAxis;
+        Vector3 start = transform.position - Vector3.one * planetRadius;
 
-        if (!sphereGenerators.ContainsKey(res))
-            sphereGenerators.Add(res, new SphereMesh(res));
-
-        var generator = sphereGenerators[res];
-        Vector3[] verts = new Vector3[generator.Vertices.Length];
-        int[] tris = new int[generator.Triangles.Length];
-        System.Array.Copy(generator.Vertices, verts, verts.Length);
-        System.Array.Copy(generator.Triangles, tris, tris.Length);
-        return (verts, tris);
-    }
-
-    void CreateMesh(ref Mesh mesh, Vector3[] verts, int[] tris)
-    {
-        if (mesh == null)
-            mesh = new Mesh();
-        else
-            mesh.Clear();
-
-        mesh.indexFormat = verts.Length < 65535
-            ? UnityEngine.Rendering.IndexFormat.UInt16
-            : UnityEngine.Rendering.IndexFormat.UInt32;
-
-        mesh.SetVertices(verts);
-        mesh.SetTriangles(tris, 0);
-        mesh.RecalculateNormals();
-    }
-
-    [System.Serializable]
-    public class ResolutionSettings
-    {
-        public int lod0 = 300;
-        public int lod1 = 100;
-        public int lod2 = 50;
-        public int collider = 100;
-
-        public int GetLODResolution(int lod)
+        for (int x = 0; x < chunkCountPerAxis; x++)
         {
-            return lod switch
+            for (int y = 0; y < chunkCountPerAxis; y++)
             {
-                0 => lod0,
-                1 => lod1,
-                2 => lod2,
-                _ => collider,
-            };
+                for (int z = 0; z < chunkCountPerAxis; z++)
+                {
+                    Vector3 chunkPos = start + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f) * spacing;
+                    GameObject chunkObj = new GameObject($"Chunk_{x}_{y}_{z}");
+                    chunkObj.transform.parent = transform;
+                    chunkObj.transform.position = chunkPos;
+                    chunkObj.transform.localScale = Vector3.one * spacing;
+
+                    PlanetChunk chunk = chunkObj.AddComponent<PlanetChunk>();
+                    chunk.shapeSettings = shapeSettings;
+                    chunk.baseMaterial = baseMaterial;
+                    chunk.baseResolution = baseResolution;
+                    chunk.maxLOD = maxLOD;
+                    chunk.chunkSize = spacing;
+                    chunk.lodDistanceMultiplier = lodDistanceMultiplier;
+
+                    chunks.Add(chunk);
+                }
+            }
         }
     }
 }
