@@ -4,7 +4,7 @@ using UnityEngine;
 public class PlanetLODController : MonoBehaviour
 {
     public ShapeSettings shapeSettings;
-    public Material baseMaterial;
+    public Material lodMaterial; // Use consistent naming for the LOD fade material
     public int baseResolution = 64;
     public int maxLOD = 4;
     public float chunkSize = 10f;
@@ -30,7 +30,7 @@ public class PlanetLODController : MonoBehaviour
 
     void GenerateChunks()
     {
-        // For simplicity, create 6 chunks, one per cube face (adjust as needed)
+        // Positions correspond to cube face centers at distance chunkSize from origin
         Vector3[] chunkPositions = new Vector3[]
         {
             Vector3.forward * chunkSize,
@@ -46,9 +46,18 @@ public class PlanetLODController : MonoBehaviour
             GameObject chunkGO = new GameObject("PlanetChunk");
             chunkGO.transform.parent = transform;
             chunkGO.transform.localPosition = pos;
+            chunkGO.transform.localScale = Vector3.one * chunkSize; // optional, depending on your chunk design
 
             PlanetChunk chunk = chunkGO.AddComponent<PlanetChunk>();
-            chunk.Initialize(shapeSettings, baseMaterial, baseResolution, maxLOD, chunkSize, lodDistanceMultiplier);
+
+            chunk.Initialize(
+                shapeSettings,
+                lodMaterial,
+                baseResolution,
+                maxLOD,
+                chunkSize,
+                lodDistanceMultiplier
+            );
 
             chunks.Add(chunk);
         }

@@ -5,7 +5,7 @@ MonoImporter:
   serializedVersion: 2
   defaultReferences:
   - shapeSettings: {fileID: 11400000, guid: 7ef9483b9e7dcea4e982bad718d7987b, type: 2}
-  - baseMaterial: {fileID: 2100000, guid: 59b5601ea48361e41a859ffb2bd918bd, type: 2}
+  - lodMaterial: {fileID: 2100000, guid: f2df5d2255c9ecf4eae16a31aed18702, type: 2}
   executionOrder: 0
   icon: {instanceID: 0}
   userData: 

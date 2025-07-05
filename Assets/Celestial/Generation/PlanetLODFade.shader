@@ -7,13 +7,14 @@ Shader "Planet/LODFade"
     }
     SubShader
     {
-        Tags { "RenderType" = "Transparent" }
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" }
         LOD 200
 
         Pass
         {
             Blend SrcAlpha OneMinusSrcAlpha
             ZWrite Off
+            Cull Off
 
             CGPROGRAM
             #pragma vertex vert
@@ -27,29 +28,30 @@ Shader "Planet/LODFade"
             {
                 float4 vertex : POSITION;
                 float2 uv : TEXCOORD0;
-                float3 normal : NORMAL;
             };
 
             struct v2f
             {
                 float4 pos : SV_POSITION;
                 float2 uv : TEXCOORD0;
-                float3 normal : TEXCOORD1;
             };
 
-            v2f vert (appdata v)
+            v2f vert(appdata v)
             {
                 v2f o;
                 o.pos = UnityObjectToClipPos(v.vertex);
                 o.uv = v.uv;
-                o.normal = UnityObjectToWorldNormal(v.normal);
                 return o;
             }
 
-            fixed4 frag (v2f i) : SV_Target
+            fixed4 frag(v2f i) : SV_Target
             {
                 fixed4 col = tex2D(_MainTex, i.uv);
                 col.a *= _FadeAmount;
+
+                // Uncomment if you want to avoid full transparency
+                // col.a = max(col.a, 0.01);
+
                 return col;
             }
             ENDCG

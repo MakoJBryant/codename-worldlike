@@ -33,6 +33,9 @@ public class PlanetDiagnostic : MonoBehaviour
         // Clone the material so we can modify _FadeAmount independently
         instanceMaterial = new Material(fadeMaterial);
         meshRenderer.material = instanceMaterial;
+
+        // Initialize fade amount immediately
+        instanceMaterial.SetFloat("_FadeAmount", fadeAmount);
     }
 
     void Update()
@@ -65,7 +68,7 @@ public class PlanetDiagnostic : MonoBehaviour
     {
         GameObject tempSphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         Mesh mesh = tempSphere.GetComponent<MeshFilter>().sharedMesh;
-        Destroy(tempSphere);
+        DestroyImmediate(tempSphere);
         return mesh;
     }
 }

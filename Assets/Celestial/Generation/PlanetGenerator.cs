@@ -4,7 +4,7 @@ using UnityEngine;
 public class PlanetGenerator : MonoBehaviour
 {
     public ShapeSettings shapeSettings;
-    public Material baseMaterial;
+    public Material lodMaterial;  // Assign your LOD fade material here in inspector
 
     public int chunkCountPerAxis = 4;
     public float planetRadius = 10f;
@@ -24,7 +24,8 @@ public class PlanetGenerator : MonoBehaviour
         Vector3 viewerPos = Camera.main ? Camera.main.transform.position : Vector3.zero;
         foreach (var chunk in chunks)
         {
-            chunk.UpdateLOD(viewerPos);
+            if (chunk != null)
+                chunk.UpdateLOD(viewerPos);
         }
     }
 
@@ -40,7 +41,7 @@ public class PlanetGenerator : MonoBehaviour
         }
         chunks.Clear();
 
-        float spacing = (planetRadius * 2) / chunkCountPerAxis;
+        float spacing = (planetRadius * 2f) / chunkCountPerAxis;
         Vector3 start = transform.position - Vector3.one * planetRadius;
 
         for (int x = 0; x < chunkCountPerAxis; x++)
@@ -56,12 +57,15 @@ public class PlanetGenerator : MonoBehaviour
                     chunkObj.transform.localScale = Vector3.one * spacing;
 
                     PlanetChunk chunk = chunkObj.AddComponent<PlanetChunk>();
-                    chunk.shapeSettings = shapeSettings;
-                    chunk.baseMaterial = baseMaterial;
-                    chunk.baseResolution = baseResolution;
-                    chunk.maxLOD = maxLOD;
-                    chunk.chunkSize = spacing;
-                    chunk.lodDistanceMultiplier = lodDistanceMultiplier;
+
+                    chunk.Initialize(
+                        shapeSettings,
+                        lodMaterial,
+                        baseResolution,
+                        maxLOD,
+                        spacing,               // chunkSize
+                        lodDistanceMultiplier
+                    );
 
                     chunks.Add(chunk);
                 }

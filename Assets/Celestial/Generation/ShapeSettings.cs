@@ -10,7 +10,7 @@ public class ShapeSettings : ScriptableObject
     public float planetRadius = 1f;
     public List<NoiseSettings> noiseLayers = new List<NoiseSettings>();
 
-    // Ensure exact memory layout matching HLSL struct (48 bytes)
+    // Match exactly to HLSL struct layout (48 bytes)
     [StructLayout(LayoutKind.Sequential)]
     struct NoiseLayerData
     {
@@ -20,20 +20,36 @@ public class ShapeSettings : ScriptableObject
         public float persistence;// 4 bytes
         public int octaves;      // 4 bytes
         public Vector3 offset;   // 12 bytes
-        public float padding;    // 4 bytes for 16-byte alignment
+        public float padding;    // 4 bytes to align to 16 bytes
     }
 
+    /// <summary>
+    /// Uses the compute shader to calculate heights for the given vertices.
+    /// </summary>
+    /// <param name="vertexBuffer">ComputeBuffer of Vector3 vertex positions.</param>
+    /// <returns>Array of heights corresponding to each vertex.</returns>
     public float[] CalculateHeights(ComputeBuffer vertexBuffer)
     {
         int vertexCount = vertexBuffer.count;
-        if (vertexCount == 0 || heightMapCompute == null)
+        if (vertexCount == 0)
         {
-            Debug.LogWarning("ShapeSettings: Missing compute shader or empty vertex buffer");
-            return new float[0];
+            Debug.LogWarning("ShapeSettings: Vertex buffer is empty.");
+            return Array.Empty<float>();
+        }
+
+        if (heightMapCompute == null)
+        {
+            Debug.LogWarning("ShapeSettings: HeightMap compute shader is not assigned.");
+            return Array.Empty<float>();
         }
 
         float[] heights = new float[vertexCount];
         int kernel = heightMapCompute.FindKernel("CSMain");
+        if (kernel < 0)
+        {
+            Debug.LogError("ShapeSettings: 'CSMain' kernel not found in compute shader.");
+            return Array.Empty<float>();
+        }
 
         using (ComputeBuffer heightBuffer = new ComputeBuffer(vertexCount, sizeof(float)))
         {
@@ -57,7 +73,7 @@ public class ShapeSettings : ScriptableObject
                     data[i].persistence = layer.persistence;
                     data[i].octaves = layer.octaves;
                     data[i].offset = layer.offset;
-                    data[i].padding = 0f; // ensure proper alignment
+                    data[i].padding = 0f; // alignment padding
                 }
 
                 noiseBuffer = new ComputeBuffer(noiseCount, Marshal.SizeOf(typeof(NoiseLayerData)));
@@ -80,4 +96,3 @@ public class ShapeSettings : ScriptableObject
         return heights;
     }
 }
-

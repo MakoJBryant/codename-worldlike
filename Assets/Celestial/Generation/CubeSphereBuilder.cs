@@ -6,9 +6,9 @@ public static class CubeSphereBuilder
     {
         if (resolution < 1) resolution = 1;
 
-        int verticesPerFace = (resolution + 1) * (resolution + 1);
-        int totalVertices = verticesPerFace * 6;
-        int totalTriangles = resolution * resolution * 6 * 6;
+        int vertsPerFace = (resolution + 1) * (resolution + 1);
+        int totalVertices = vertsPerFace * 6;
+        int totalTriangles = resolution * resolution * 6 * 6; // 2 tris per quad * 3 indices
 
         Vector3[] vertices = new Vector3[totalVertices];
         int[] triangles = new int[totalTriangles];
@@ -25,7 +25,13 @@ public static class CubeSphereBuilder
         for (int face = 0; face < 6; face++)
         {
             Vector3 normal = directions[face];
-            Vector3 axisA = new Vector3(normal.y, normal.z, normal.x);
+
+            // Pick axisA perpendicular to normal
+            Vector3 axisA = Vector3.Cross(normal, Vector3.up);
+            if (axisA.sqrMagnitude < 0.01f)
+                axisA = Vector3.Cross(normal, Vector3.right);
+            axisA.Normalize();
+
             Vector3 axisB = Vector3.Cross(normal, axisA);
 
             for (int y = 0; y <= resolution; y++)
@@ -35,10 +41,12 @@ public static class CubeSphereBuilder
                     float percentX = x / (float)resolution;
                     float percentY = y / (float)resolution;
 
+                    // Point on cube face in [-1, 1] range centered on face normal
                     Vector3 pointOnUnitCube = normal
                         + (percentX - 0.5f) * 2f * axisA
                         + (percentY - 0.5f) * 2f * axisB;
 
+                    // Project to unit sphere surface
                     Vector3 pointOnUnitSphere = pointOnUnitCube.normalized;
 
                     vertices[vertIndex++] = pointOnUnitSphere;
@@ -49,7 +57,7 @@ public static class CubeSphereBuilder
         vertIndex = 0;
         for (int face = 0; face < 6; face++)
         {
-            int faceVertexStart = face * verticesPerFace;
+            int faceVertexStart = face * vertsPerFace;
             for (int y = 0; y < resolution; y++)
             {
                 for (int x = 0; x < resolution; x++)

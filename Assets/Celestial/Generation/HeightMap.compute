@@ -20,9 +20,42 @@ uint numNoiseLayers;
 uint vertexCount;
 float planetRadius;
 
+// Original hash function for base randomness
 float hash(float3 p)
 {
     return frac(sin(dot(p, float3(12.9898, 78.233, 45.164))) * 43758.5453);
+}
+
+// Linear interpolation helper
+float lerp(float a, float b, float t)
+{
+    return a + t * (b - a);
+}
+
+// Smooth trilinear interpolated noise from hash points
+float smoothHash(float3 p)
+{
+    float3 i = floor(p);
+    float3 f = frac(p);
+
+    float n000 = hash(i + float3(0, 0, 0));
+    float n100 = hash(i + float3(1, 0, 0));
+    float n010 = hash(i + float3(0, 1, 0));
+    float n110 = hash(i + float3(1, 1, 0));
+    float n001 = hash(i + float3(0, 0, 1));
+    float n101 = hash(i + float3(1, 0, 1));
+    float n011 = hash(i + float3(0, 1, 1));
+    float n111 = hash(i + float3(1, 1, 1));
+
+    float nx00 = lerp(n000, n100, f.x);
+    float nx10 = lerp(n010, n110, f.x);
+    float nx01 = lerp(n001, n101, f.x);
+    float nx11 = lerp(n011, n111, f.x);
+
+    float nxy0 = lerp(nx00, nx10, f.y);
+    float nxy1 = lerp(nx01, nx11, f.y);
+
+    return lerp(nxy0, nxy1, f.z);
 }
 
 float fbm(float3 p, NoiseLayerData layer)
@@ -34,7 +67,7 @@ float fbm(float3 p, NoiseLayerData layer)
     for (uint i = 0; i < layer.octaves; i++)
     {
         float3 samplePos = p * frequency + layer.offset;
-        total += hash(samplePos) * amplitude;
+        total += smoothHash(samplePos) * amplitude;
         frequency *= 2.0;
         amplitude *= layer.persistence;
     }
@@ -60,6 +93,9 @@ void CSMain(uint3 id : SV_DispatchThreadID)
             height += fbm(pos, layer);
         }
     }
+
+    // Clamp height to avoid weird negative radius values
+    height = max(height, 0.1);
 
     heights[index] = height * planetRadius;
 }

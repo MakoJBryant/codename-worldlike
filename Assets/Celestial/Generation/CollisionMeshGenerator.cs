@@ -34,28 +34,56 @@ public class CollisionMeshGenerator : MonoBehaviour
         }
     }
 
+    void OnValidate()
+    {
+        // Auto-update collider mesh when values change in inspector
+        GenerateCollisionMesh();
+    }
+
     void GenerateCollisionMesh()
     {
-        if (shapeSettings == null || shapeSettings.heightMapCompute == null)
+        if (shapeSettings == null)
         {
-            Debug.LogWarning("Missing shape settings or compute shader for collider.");
+            Debug.LogWarning("CollisionMeshGenerator: shapeSettings is null. Cannot generate collision mesh.");
+            return;
+        }
+        if (shapeSettings.heightMapCompute == null)
+        {
+            Debug.LogWarning("CollisionMeshGenerator: shapeSettings.heightMapCompute is null. Cannot generate collision mesh.");
+            return;
+        }
+        if (colliderResolution < 1)
+        {
+            Debug.LogWarning("CollisionMeshGenerator: colliderResolution must be >= 1.");
             return;
         }
 
-        // Explicit typing for deconstruction from CubeSphereBuilder
+        Debug.Log($"CollisionMeshGenerator: Generating collision mesh with resolution {colliderResolution}...");
+
         (Vector3[] verts, int[] tris) = CubeSphereBuilder.Generate(colliderResolution);
 
         if (verts.Length == 0 || tris.Length == 0)
         {
-            Debug.LogWarning("Generated zero vertices or triangles for collider.");
+            Debug.LogWarning("CollisionMeshGenerator: Generated zero vertices or triangles for collider.");
             return;
         }
+
+        Debug.Log($"CollisionMeshGenerator: Generated {verts.Length} vertices and {tris.Length} triangles.");
 
         vertexBuffer?.Release();
         vertexBuffer = new ComputeBuffer(verts.Length, sizeof(float) * 3);
         vertexBuffer.SetData(verts);
 
         float[] heights = shapeSettings.CalculateHeights(vertexBuffer);
+
+        if (heights == null || heights.Length != verts.Length)
+        {
+            Debug.LogWarning($"CollisionMeshGenerator: Heights array length {heights?.Length ?? 0} doesn't match vertices length {verts.Length}.");
+            vertexBuffer.Release();
+            vertexBuffer = null;
+            return;
+        }
+
         for (int i = 0; i < verts.Length; i++)
         {
             verts[i] *= heights[i];
@@ -78,6 +106,11 @@ public class CollisionMeshGenerator : MonoBehaviour
         if (meshCollider != null)
         {
             meshCollider.sharedMesh = collisionMesh;
+            Debug.Log("CollisionMeshGenerator: Assigned generated mesh to MeshCollider.");
+        }
+        else
+        {
+            Debug.LogWarning("CollisionMeshGenerator: No MeshCollider component found on this GameObject.");
         }
     }
 }
