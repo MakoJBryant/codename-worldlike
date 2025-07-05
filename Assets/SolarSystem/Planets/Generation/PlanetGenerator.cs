@@ -71,12 +71,16 @@ namespace SolarSystem.Planets.Generation
             mesh.name = "Planet Mesh";
             mesh.CombineMeshes(combine, true, false);
 
-            mesh.RecalculateNormals(); // Important for correct lighting!
+            // Recalculate normals for smooth shading
+            mesh.RecalculateNormals();
 
-            meshFilter.sharedMesh = mesh;
-
+            // Assign colors after normals are calculated (we'll update colors in next step)
             AssignColors();
+
+            // Finally assign mesh to meshFilter
+            meshFilter.sharedMesh = mesh;
         }
+
 
         private void AssignColors()
         {
