@@ -1,19 +1,22 @@
 using UnityEngine;
-using System.Collections.Generic;
+using System.Collections.Generic; // Although not strictly used now, good to have for potential future lists
 
+// [ExecuteInEditMode] allows the script to run even when the game is not playing.
+// This is incredibly useful for procedural generation as you can see changes instantly
+// when adjusting parameters in the Inspector.
 [ExecuteInEditMode]
 public class PlanetGenerator : MonoBehaviour
 {
     // --- Public Parameters - Adjustable in the Inspector ---
 
-    [Range(2, 256)]
-    public int resolution = 64;
-    public float radius = 1f;
+    [Range(2, 256)] // Clamp resolution for reasonable performance in Editor
+    public int resolution = 64; // Controls the detail of the planet mesh. Higher = more detailed.
+    public float radius = 1f;    // The base radius of the planet.
 
     [Header("Noise Settings")]
     public float noiseStrength = 1.0f;
     public float noiseRoughness = 1.0f; // This will now act as the base frequency for FBM
-    public Vector3 noiseOffset = Vector3.zero;
+    public Vector3 noiseOffset = Vector3.zero; // NEW: Offset for the noise to break symmetry
 
     [Range(1, 8)] // Number of noise layers (octaves)
     public int octaves = 4;
@@ -59,6 +62,7 @@ public class PlanetGenerator : MonoBehaviour
             meshFilter.sharedMesh = mesh;
         }
 
+
         // Immediately generate the planet when the game starts or in editor's Awake.
         GeneratePlanet();
     }
@@ -70,20 +74,24 @@ public class PlanetGenerator : MonoBehaviour
     // relying on Awake() for runtime and the Context Menu for editor-time generation.
     void OnValidate()
     {
-        // For immediate feedback on property changes in the editor,
-        // you should rely on the "Generate Planet Now" context menu button.
-
+        // If the noiseOffset is still at its default zero and we are in the editor (not playing),
+        // randomize it to ensure unique planets by default.
+        if (noiseOffset == Vector3.zero && !Application.isPlaying)
+        {
+            RandomizeNoiseOffset(); // This will also call GeneratePlanet()
+        }
         // If you need to ensure the mesh object exists for other editor-time logic (e.g., if debugging other parts
         // of the script in the editor that rely on 'mesh' not being null), you can do a minimal check here.
         // However, AVOID re-initializing components (like calling GetComponent or AddComponent)
         // or assigning the mesh to meshFilter.sharedMesh here, as these trigger the SendMessage error.
-        if (mesh == null)
+        else if (mesh == null) // Only initialize mesh if it's null and not randomizing
         {
             mesh = new Mesh();
             mesh.name = "Generated Planet Mesh";
         }
 
-        // DO NOT uncomment or add calls to GeneratePlanet() or Awake() here.
+        // DO NOT uncomment or add calls to GeneratePlanet() or Awake() here unless they are conditional
+        // on the noiseOffset randomization, as seen above.
         // Any such calls here will reintroduce the "SendMessage" error.
     }
 
@@ -104,6 +112,7 @@ public class PlanetGenerator : MonoBehaviour
             mesh.name = "Generated Planet Mesh";
             meshFilter.sharedMesh = mesh; // Ensure the filter has the mesh if we just created it
         }
+
 
         // Clear any previous mesh data
         mesh.Clear();
@@ -134,6 +143,7 @@ public class PlanetGenerator : MonoBehaviour
             {
                 // Sample the 3D Perlin noise for the current octave
                 // The position is scaled by noiseRoughness (base frequency) and currentFrequency (octave's specific frequency)
+                // NEW: Apply noiseOffset here to break symmetry
                 float sampleX = (normalDirection.x + noiseOffset.x) * (noiseRoughness * currentFrequency);
                 float sampleY = (normalDirection.y + noiseOffset.y) * (noiseRoughness * currentFrequency);
                 float sampleZ = (normalDirection.z + noiseOffset.z) * (noiseRoughness * currentFrequency);
@@ -225,5 +235,21 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         Debug.Log($"PlanetGenerator: Mesh assigned. Vertices: {mesh.vertexCount}, Triangles: {mesh.triangles.Length / 3}");
+    }
+
+    /// <summary>
+    /// Generates a random offset for the noise function.
+    /// This helps break the visual symmetry of procedurally generated planets.
+    /// </summary>
+    [ContextMenu("Randomize Noise Offset")] // Add this context menu for easy editor use
+    public void RandomizeNoiseOffset()
+    {
+        // Use large random numbers to ensure distinct noise patterns
+        // Values like 1000-10000 work well to effectively shift the origin
+        noiseOffset = new Vector3(Random.Range(-10000f, 10000f), Random.Range(-10000f, 10000f), Random.Range(-10000f, 10000f));
+        Debug.Log($"Planet noise offset randomized to: {noiseOffset}");
+
+        // Immediately regenerate the planet to show the new noise pattern
+        GeneratePlanet();
     }
 }
