@@ -12,8 +12,17 @@ public class PlanetGenerator : MonoBehaviour
 
     [Header("Noise Settings")]
     public float noiseStrength = 1.0f;
-    public float noiseRoughness = 1.0f;
+    public float noiseRoughness = 1.0f; // This will now act as the base frequency for FBM
     public Vector3 noiseOffset = Vector3.zero;
+
+    [Range(1, 8)] // Number of noise layers (octaves)
+    public int octaves = 4;
+
+    [Range(0.01f, 1.0f)] // How much amplitude decreases with each octave
+    public float persistence = 0.5f;
+
+    [Range(1.0f, 4.0f)] // How much frequency increases with each octave
+    public float lacunarity = 2.0f;
 
     // --- Private References (Unity Components) ---
     private MeshFilter meshFilter;
@@ -49,7 +58,6 @@ public class PlanetGenerator : MonoBehaviour
         {
             meshFilter.sharedMesh = mesh;
         }
-
 
         // Immediately generate the planet when the game starts or in editor's Awake.
         GeneratePlanet();
@@ -97,7 +105,6 @@ public class PlanetGenerator : MonoBehaviour
             meshFilter.sharedMesh = mesh; // Ensure the filter has the mesh if we just created it
         }
 
-
         // Clear any previous mesh data
         mesh.Clear();
 
@@ -107,7 +114,7 @@ public class PlanetGenerator : MonoBehaviour
         Vector2[] uvs;
         SphereCreator.CreateSphereMesh(resolution, radius, out vertices, out triangles, out uvs);
 
-        // Step 2: Apply noise to displace vertices
+        // Step 2: Apply FRACTAL BROWNIAN MOTION (FBM) noise to displace vertices
         for (int i = 0; i < vertices.Length; i++)
         {
             Vector3 vertex = vertices[i];
@@ -116,20 +123,47 @@ public class PlanetGenerator : MonoBehaviour
             // For a sphere generated at the origin, this is just the normalized vertex position.
             Vector3 normalDirection = vertex.normalized;
 
-            // Sample 3D Perlin noise based on the vertex position (scaled by roughness and offset)
-            // We use the normalized position here so that noise looks continuous over the sphere surface.
-            float noiseValue = PerlinNoise3D.GenerateNoise(
-                (normalDirection.x + noiseOffset.x) * noiseRoughness,
-                (normalDirection.y + noiseOffset.y) * noiseRoughness,
-                (normalDirection.z + noiseOffset.z) * noiseRoughness
-            );
+            // --- FRACTAL BROWNIAN MOTION (FBM) NOISE CALCULATION ---
+            float noiseSum = 0;
+            float currentAmplitude = 1; // Starts at full amplitude for the first octave
+            float currentFrequency = 1; // Starts at base frequency for the first octave
+            float totalAmplitude = 0;   // Used for normalizing the final noise value
 
-            // Normalize noise from 0-1 to -1 to 1 range (or any other desired range for displacement)
-            // (noiseValue * 2 - 1) makes 0-1 range into -1 to 1 range.
-            // This allows for both inward and outward displacement.
-            float displacement = (noiseValue * 2 - 1) * noiseStrength;
+            // Loop through multiple octaves (layers) of noise
+            for (int j = 0; j < octaves; j++)
+            {
+                // Sample the 3D Perlin noise for the current octave
+                // The position is scaled by noiseRoughness (base frequency) and currentFrequency (octave's specific frequency)
+                float sampleX = (normalDirection.x + noiseOffset.x) * (noiseRoughness * currentFrequency);
+                float sampleY = (normalDirection.y + noiseOffset.y) * (noiseRoughness * currentFrequency);
+                float sampleZ = (normalDirection.z + noiseOffset.z) * (noiseRoughness * currentFrequency);
 
-            // Displace the vertex along its normal direction
+                float octaveNoise = PerlinNoise3D.GenerateNoise(sampleX, sampleY, sampleZ);
+
+                // PerlinNoise3D returns a value between 0.0 and 1.0.
+                // We map it to a range between -1.0 and 1.0 for terrain displacement (0.5 becomes 0).
+                float scaledOctaveNoise = (octaveNoise * 2.0f - 1.0f);
+
+                // Add this octave's scaled noise, weighted by its current amplitude, to the total sum
+                noiseSum += scaledOctaveNoise * currentAmplitude;
+
+                // Accumulate the amplitude to normalize the final noise sum later
+                totalAmplitude += currentAmplitude;
+
+                // Decrease amplitude (persistence) and increase frequency (lacunarity) for the next octave
+                currentAmplitude *= persistence;
+                currentFrequency *= lacunarity;
+            }
+
+            // Normalize the final noise sum by the sum of amplitudes.
+            // This brings the FBM output to a more predictable range, typically centered around 0.
+            float finalNormalizedNoise = noiseSum / totalAmplitude;
+
+            // Apply the overall noise strength to determine the final displacement amount
+            float displacement = finalNormalizedNoise * noiseStrength;
+            // --- END OF FBM CALCULATION ---
+
+            // Displace the vertex along its normal direction by the calculated amount
             vertices[i] = vertex + normalDirection * displacement;
         }
 
@@ -138,15 +172,48 @@ public class PlanetGenerator : MonoBehaviour
         mesh.triangles = triangles;
         mesh.uv = uvs; // Assign UVs for texturing
 
-        // Step 4: Recalculate normals for proper lighting. This is crucial!
-        mesh.RecalculateNormals();
+        // IMPORTANT: Update the mesh's bounding box after changing vertices
+        mesh.RecalculateBounds();
+
+        // --- CUSTOM NORMAL CALCULATION (REPLACES mesh.RecalculateNormals()) ---
+        Vector3[] normals = new Vector3[vertices.Length];
+        // Loop through each triangle to calculate face normals and accumulate them per vertex
+        for (int i = 0; i < triangles.Length; i += 3)
+        {
+            // Get the indices of the three vertices of the current triangle
+            int i1 = triangles[i];
+            int i2 = triangles[i + 1];
+            int i3 = triangles[i + 2];
+
+            // Get the actual vertex positions
+            Vector3 v1 = vertices[i1];
+            Vector3 v2 = vertices[i2];
+            Vector3 v3 = vertices[i3];
+
+            // Calculate the face normal using the cross product
+            // The order matters for direction: (v2 - v1) x (v3 - v1) gives the normal pointing outwards from the face
+            Vector3 faceNormal = Vector3.Cross(v2 - v1, v3 - v1).normalized;
+
+            // Add this face normal to the normal of each vertex in the triangle.
+            // Vertices shared by multiple triangles will have their normals averaged this way.
+            normals[i1] += faceNormal;
+            normals[i2] += faceNormal;
+            normals[i3] += faceNormal;
+        }
+
+        // After accumulating all face normals, normalize each vertex normal to get the final smoothed normal
+        for (int i = 0; i < normals.Length; i++)
+        {
+            // Normalize each accumulated normal. This averages the directions of contributing face normals.
+            normals[i].Normalize();
+        }
+        mesh.normals = normals; // Assign the custom calculated normals to the mesh
+        // --- END CUSTOM NORMAL CALCULATION ---
 
         // Optional: Recalculate tangents if you plan to use normal maps in your shader.
-        // mesh.RecalculateTangents();
+        // mesh.RecalculateTangents(); // Not needed if you're not using normal maps derived from texture
 
         // Step 5: Assign the mesh to the MeshFilter (already done in Awake, but good to ensure)
-        // This line (meshFilter.sharedMesh = mesh;) is at the heart of the "SendMessage" error
-        // when called from OnValidate. It is now only called from Awake or via the Context Menu.
         meshFilter.sharedMesh = mesh;
 
         // Step 6: Assign the mesh to the MeshCollider for physics interaction.
@@ -156,7 +223,6 @@ public class PlanetGenerator : MonoBehaviour
         {
             meshCollider.sharedMesh = mesh;
         }
-
 
         Debug.Log($"PlanetGenerator: Mesh assigned. Vertices: {mesh.vertexCount}, Triangles: {mesh.triangles.Length / 3}");
     }
