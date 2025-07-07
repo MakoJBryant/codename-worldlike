@@ -1,5 +1,6 @@
 using UnityEngine;
-using System.Collections.Generic; // Although not strictly used now, good to have for potential future lists
+// No need for System.Collections.Generic here if not using Lists directly anymore.
+// Using 'NoiseLayer' directly implies the file containing 'NoiseLayer' is accessible.
 
 // [ExecuteInEditMode] allows the script to run even when the game is not playing.
 // This is incredibly useful for procedural generation as you can see changes instantly
@@ -13,25 +14,22 @@ public class PlanetGenerator : MonoBehaviour
     public int resolution = 64; // Controls the detail of the planet mesh. Higher = more detailed.
     public float radius = 1f;    // The base radius of the planet.
 
-    [Header("Noise Settings")]
-    public float noiseStrength = 1.0f;
-    public float noiseRoughness = 1.0f; // This will now act as the base frequency for FBM
-    public Vector3 noiseOffset = Vector3.zero; // NEW: Offset for the noise to break symmetry
+    // This is the array that will hold all your different noise configurations
+    [Header("Noise Layers")]
+    public NoiseLayer[] noiseLayers;
 
-    [Range(1, 8)] // Number of noise layers (octaves)
-    public int octaves = 4;
-
-    [Range(0.01f, 1.0f)] // How much amplitude decreases with each octave
-    public float persistence = 0.5f;
-
-    [Range(1.0f, 4.0f)] // How much frequency increases with each octave
-    public float lacunarity = 2.0f;
+    // NEW: Color settings for the planet's surface
+    [Header("Color Settings")]
+    public ColorSettings colorSettings;
 
     // --- Private References (Unity Components) ---
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
     private MeshCollider meshCollider;
     private Mesh mesh;
+    // NEW: To store the actual min/max elevation for shader
+    private float minElevation;
+    private float maxElevation;
 
     // --- Awake is called when the script instance is being loaded ---
     void Awake()
@@ -62,7 +60,6 @@ public class PlanetGenerator : MonoBehaviour
             meshFilter.sharedMesh = mesh;
         }
 
-
         // Immediately generate the planet when the game starts or in editor's Awake.
         GeneratePlanet();
     }
@@ -74,25 +71,18 @@ public class PlanetGenerator : MonoBehaviour
     // relying on Awake() for runtime and the Context Menu for editor-time generation.
     void OnValidate()
     {
-        // If the noiseOffset is still at its default zero and we are in the editor (not playing),
-        // randomize it to ensure unique planets by default.
-        if (noiseOffset == Vector3.zero && !Application.isPlaying)
-        {
-            RandomizeNoiseOffset(); // This will also call GeneratePlanet()
-        }
         // If you need to ensure the mesh object exists for other editor-time logic (e.g., if debugging other parts
         // of the script in the editor that rely on 'mesh' not being null), you can do a minimal check here.
         // However, AVOID re-initializing components (like calling GetComponent or AddComponent)
         // or assigning the mesh to meshFilter.sharedMesh here, as these trigger the SendMessage error.
-        else if (mesh == null) // Only initialize mesh if it's null and not randomizing
+        if (mesh == null)
         {
             mesh = new Mesh();
             mesh.name = "Generated Planet Mesh";
         }
 
-        // DO NOT uncomment or add calls to GeneratePlanet() or Awake() here unless they are conditional
-        // on the noiseOffset randomization, as seen above.
-        // Any such calls here will reintroduce the "SendMessage" error.
+        // The automatic noiseOffset randomization for a single offset has been removed.
+        // You will now manage offsets for each NoiseLayer individually in the Inspector.
     }
 
     // --- Context Menu allows right-clicking the component in the Inspector to trigger a method ---
@@ -113,7 +103,6 @@ public class PlanetGenerator : MonoBehaviour
             meshFilter.sharedMesh = mesh; // Ensure the filter has the mesh if we just created it
         }
 
-
         // Clear any previous mesh data
         mesh.Clear();
 
@@ -123,58 +112,92 @@ public class PlanetGenerator : MonoBehaviour
         Vector2[] uvs;
         SphereCreator.CreateSphereMesh(resolution, radius, out vertices, out triangles, out uvs);
 
-        // Step 2: Apply FRACTAL BROWNIAN MOTION (FBM) noise to displace vertices
+        // NEW: Initialize min/max elevation before calculating displacement
+        minElevation = float.MaxValue;
+        maxElevation = float.MinValue;
+
+        // Step 2: Apply MULTI-LAYERED FRACTAL BROWNIAN MOTION (FBM) noise to displace vertices
         for (int i = 0; i < vertices.Length; i++)
         {
             Vector3 vertex = vertices[i];
-
-            // Get the direction from the planet's center to the current vertex.
-            // For a sphere generated at the origin, this is just the normalized vertex position.
             Vector3 normalDirection = vertex.normalized;
 
-            // --- FRACTAL BROWNIAN MOTION (FBM) NOISE CALCULATION ---
-            float noiseSum = 0;
-            float currentAmplitude = 1; // Starts at full amplitude for the first octave
-            float currentFrequency = 1; // Starts at base frequency for the first octave
-            float totalAmplitude = 0;   // Used for normalizing the final noise value
+            float totalElevation = 0; // Accumulates total displacement from all layers
+            float firstLayerValue = 0; // To be used for masking by subsequent layers
 
-            // Loop through multiple octaves (layers) of noise
-            for (int j = 0; j < octaves; j++)
+            // Iterate through each defined NoiseLayer
+            foreach (NoiseLayer noiseLayer in noiseLayers)
             {
-                // Sample the 3D Perlin noise for the current octave
-                // The position is scaled by noiseRoughness (base frequency) and currentFrequency (octave's specific frequency)
-                // NEW: Apply noiseOffset here to break symmetry
-                float sampleX = (normalDirection.x + noiseOffset.x) * (noiseRoughness * currentFrequency);
-                float sampleY = (normalDirection.y + noiseOffset.y) * (noiseRoughness * currentFrequency);
-                float sampleZ = (normalDirection.z + noiseOffset.z) * (noiseRoughness * currentFrequency);
+                if (!noiseLayer.enabled) continue; // Skip this layer if it's disabled
 
-                float octaveNoise = PerlinNoise3D.GenerateNoise(sampleX, sampleY, sampleZ);
+                float currentLayerNoise = 0;
+                float currentFrequency = noiseLayer.roughness; // Start frequency for this layer
+                float currentAmplitude = 1; // Start amplitude for this layer
+                float totalLayerAmplitude = 0; // Used for normalizing this layer's FBM output
 
-                // PerlinNoise3D returns a value between 0.0 and 1.0.
-                // We map it to a range between -1.0 and 1.0 for terrain displacement (0.5 becomes 0).
-                float scaledOctaveNoise = (octaveNoise * 2.0f - 1.0f);
+                // Calculate FBM for this individual noise layer
+                for (int j = 0; j < noiseLayer.octaves; j++)
+                {
+                    // Sample point for this octave, combining normal direction, layer offset, and frequency
+                    Vector3 samplePoint = (normalDirection + noiseLayer.offset) * currentFrequency;
 
-                // Add this octave's scaled noise, weighted by its current amplitude, to the total sum
-                noiseSum += scaledOctaveNoise * currentAmplitude;
+                    float v = PerlinNoise3D.GenerateNoise(samplePoint.x, samplePoint.y, samplePoint.z);
 
-                // Accumulate the amplitude to normalize the final noise sum later
-                totalAmplitude += currentAmplitude;
+                    // Apply noise type specific modification
+                    if (noiseLayer.noiseType == NoiseType.Ridge)
+                    {
+                        // Ridge noise: maps original noise range [0,1] to [0,1] but with a sharper, creased effect.
+                        // v * 2 - 1 maps to [-1, 1]. Mathf.Abs makes it [0, 1]. 1 - Abs inverts it (valleys become peaks).
+                        v = 1 - Mathf.Abs(v * 2 - 1);
+                    }
+                    else // Standard noise (map 0-1 to -1 to 1 for displacement around the sphere surface)
+                    {
+                        v = v * 2 - 1;
+                    }
 
-                // Decrease amplitude (persistence) and increase frequency (lacunarity) for the next octave
-                currentAmplitude *= persistence;
-                currentFrequency *= lacunarity;
+                    currentLayerNoise += v * currentAmplitude; // Accumulate noise for this layer
+
+                    totalLayerAmplitude += currentAmplitude; // Track total amplitude for normalization
+                    currentAmplitude *= noiseLayer.persistence; // Decrease amplitude for next octave
+                    currentFrequency *= noiseLayer.lacunarity; // Increase frequency for next octave
+                }
+
+                // Normalize the current layer's noise sum by its total accumulated amplitude
+                float normalizedLayerNoise = (totalLayerAmplitude == 0) ? 0 : currentLayerNoise / totalLayerAmplitude;
+
+                // Apply minValue: Ensure noise is always above a certain baseline (e.g., for ocean floor)
+                float finalLayerNoise = Mathf.Max(0, normalizedLayerNoise + noiseLayer.minValue);
+
+                // If this layer is designated as the mask, store its value.
+                // Assuming the first enabled layer found is the intended mask.
+                if (noiseLayer.useFirstLayerAsMask)
+                {
+                    firstLayerValue = finalLayerNoise;
+                }
+
+                // Apply masking: If this layer uses the mask, only add its effect if the first layer's value is positive.
+                if (noiseLayer.useFirstLayerAsMask && firstLayerValue <= 0)
+                {
+                    finalLayerNoise = 0; // Effectively, don't apply this layer's noise if mask condition not met
+                }
+
+                // Accumulate this layer's contribution to the total elevation
+                totalElevation += finalLayerNoise * noiseLayer.strength;
             }
 
-            // Normalize the final noise sum by the sum of amplitudes.
-            // This brings the FBM output to a more predictable range, typically centered around 0.
-            float finalNormalizedNoise = noiseSum / totalAmplitude;
+            // Displace the vertex along its normal direction by the total accumulated elevation
+            vertices[i] = vertex + normalDirection * totalElevation;
 
-            // Apply the overall noise strength to determine the final displacement amount
-            float displacement = finalNormalizedNoise * noiseStrength;
-            // --- END OF FBM CALCULATION ---
-
-            // Displace the vertex along its normal direction by the calculated amount
-            vertices[i] = vertex + normalDirection * displacement;
+            // NEW: Update min/max elevation based on current vertex displacement
+            // totalElevation here is the raw displacement from the base radius
+            if (totalElevation < minElevation)
+            {
+                minElevation = totalElevation;
+            }
+            if (totalElevation > maxElevation)
+            {
+                maxElevation = totalElevation;
+            }
         }
 
         // Step 3: Assign the modified data to the Mesh
@@ -226,6 +249,22 @@ public class PlanetGenerator : MonoBehaviour
         // Step 5: Assign the mesh to the MeshFilter (already done in Awake, but good to ensure)
         meshFilter.sharedMesh = mesh;
 
+        // NEW: Assign the material and pass elevation data to it
+        if (meshRenderer == null) meshRenderer = GetComponent<MeshRenderer>(); // Ensure reference
+        if (meshRenderer != null && colorSettings != null)
+        {
+            meshRenderer.sharedMaterial = colorSettings.planetMaterial;
+            // Pass the actual min/max elevations to the shader
+            meshRenderer.sharedMaterial.SetFloat("_MinElevation", minElevation);
+            meshRenderer.sharedMaterial.SetFloat("_MaxElevation", maxElevation);
+
+            // Also pass the base radius, as shader often needs to know this for accurate lighting/shading
+            meshRenderer.sharedMaterial.SetFloat("_Radius", radius);
+
+            // For now, we're passing these three simple floats.
+            // In the next phase, we'll look at passing the biome colors more dynamically.
+        }
+
         // Step 6: Assign the mesh to the MeshCollider for physics interaction.
         // Ensure meshCollider exists before assigning to it
         if (meshCollider == null) meshCollider = GetComponent<MeshCollider>();
@@ -235,21 +274,5 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         Debug.Log($"PlanetGenerator: Mesh assigned. Vertices: {mesh.vertexCount}, Triangles: {mesh.triangles.Length / 3}");
-    }
-
-    /// <summary>
-    /// Generates a random offset for the noise function.
-    /// This helps break the visual symmetry of procedurally generated planets.
-    /// </summary>
-    [ContextMenu("Randomize Noise Offset")] // Add this context menu for easy editor use
-    public void RandomizeNoiseOffset()
-    {
-        // Use large random numbers to ensure distinct noise patterns
-        // Values like 1000-10000 work well to effectively shift the origin
-        noiseOffset = new Vector3(Random.Range(-10000f, 10000f), Random.Range(-10000f, 10000f), Random.Range(-10000f, 10000f));
-        Debug.Log($"Planet noise offset randomized to: {noiseOffset}");
-
-        // Immediately regenerate the planet to show the new noise pattern
-        GeneratePlanet();
     }
 }
