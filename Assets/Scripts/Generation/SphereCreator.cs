@@ -30,7 +30,7 @@ public static class SphereCreator
         // Each face is a (resolution + 1) x (resolution + 1) grid of vertices.
         int numVerticesPerFace = (resolution + 1) * (resolution + 1);
         vertices = new Vector3[numVerticesPerFace * 6]; // 6 faces
-        uvs = new Vector2[numVerticesPerFace * 6];     // UVs for each vertex
+        uvs = new Vector2[numVerticesPerFace * 6];      // UVs for each vertex
 
         // Calculate the total number of triangle indices needed for all 6 faces.
         // Each face has resolution * resolution quads.
@@ -38,20 +38,24 @@ public static class SphereCreator
         int numTrianglesPerFace = resolution * resolution * 2;
         triangles = new int[numTrianglesPerFace * 3 * 6]; // 6 faces, 3 indices per triangle
 
-        // Define the 6 faces of the cube.
-        // localUp: The 'normal' direction of the face.
-        // axisA, axisB: The two perpendicular axes that define the plane of the face.
+        // --- CORRECTED FACE DEFINITIONS ---
+        // These definitions ensure that for each face, Vector3.Cross(axisA, axisB) points
+        // in the same direction as localUp. This creates a consistent right-handed
+        // coordinate system for the grid on each face, leading to consistent outward-facing normals
+        // when combined with the standard triangle winding order.
         Face[] faces = new Face[]
         {
-            new Face { localUp = Vector3.up, axisA = Vector3.right, axisB = Vector3.forward },
-            new Face { localUp = Vector3.down, axisA = Vector3.right, axisB = Vector3.back },
-            new Face { localUp = Vector3.left, axisA = Vector3.forward, axisB = Vector3.up },
-            new Face { localUp = Vector3.right, axisA = Vector3.back, axisB = Vector3.up },
-            new Face { localUp = Vector3.forward, axisA = Vector3.up, axisB = Vector3.right },
-            new Face { localUp = Vector3.back, axisA = Vector3.up, axisB = Vector3.left } // Corrected axisB for back face
+            // localUp       axisA (X-direction on face)  axisB (Y-direction on face)
+            new Face { localUp = Vector3.up,      axisA = Vector3.forward,  axisB = Vector3.right }, // For Top face (+Y): X moves Forward, Y moves Right
+            new Face { localUp = Vector3.down,    axisA = Vector3.back,     axisB = Vector3.right }, // For Bottom face (-Y): X moves Back, Y moves Right
+            new Face { localUp = Vector3.left,    axisA = Vector3.forward,  axisB = Vector3.up },    // For Left face (-X): X moves Forward, Y moves Up
+            new Face { localUp = Vector3.right,   axisA = Vector3.back,     axisB = Vector3.up },    // For Right face (+X): X moves Back, Y moves Up
+            new Face { localUp = Vector3.forward, axisA = Vector3.right,    axisB = Vector3.up },    // For Front face (+Z): X moves Right, Y moves Up
+            new Face { localUp = Vector3.back,    axisA = Vector3.left,     axisB = Vector3.up }     // For Back face (-Z): X moves Left, Y moves Up
         };
+        // --- END CORRECTED FACE DEFINITIONS ---
 
-        int vertexIndex = 0;   // Current index for adding vertices to the 'vertices' array
+        int vertexIndex = 0;    // Current index for adding vertices to the 'vertices' array
         int triangleIndex = 0; // Current index for adding triangle indices to the 'triangles' array
 
         // Loop through each face and generate its mesh data.
@@ -105,23 +109,19 @@ public static class SphereCreator
                 int i = currentFaceVertexStart + y * (resolution + 1) + x;
 
                 // Define the two triangles that form the quad.
-                // The winding order (clockwise/counter-clockwise) is crucial for rendering.
-                // If your mesh doesn't show up, try swapping two indices in each triangle.
-                // This order (0, 1, 2) and (0, 2, 3) for a quad like this:
-                // 2 -- 3
-                // |    |
-                // 0 -- 1
-                // Usually works for front-facing normals.
+                // Standard Clockwise Winding for a quad (BL, BR, TL) and (BR, TR, TL)
+                // This winding order, combined with the new `axisA`/`axisB` definitions,
+                // should result in consistently outward-pointing normals for all faces.
 
-                // First triangle (bottom-left, top-left, top-right)
-                triangles[triangleIndex] = i;                   // Bottom-left
-                triangles[triangleIndex + 1] = i + resolution + 1; // Top-left (vertex on next row)
-                triangles[triangleIndex + 2] = i + 1;           // Bottom-right
+                // First triangle: Bottom-Left, Bottom-Right, Top-Left
+                triangles[triangleIndex] = i;                   // Vertex at (x,y)
+                triangles[triangleIndex + 1] = i + 1;           // Vertex at (x+1,y)
+                triangles[triangleIndex + 2] = i + resolution + 1; // Vertex at (x,y+1)
 
-                // Second triangle (top-right, top-left, bottom-right of next row)
-                triangles[triangleIndex + 3] = i + 1;           // Bottom-right
-                triangles[triangleIndex + 4] = i + resolution + 1; // Top-left
-                triangles[triangleIndex + 5] = i + resolution + 2; // Top-right (vertex on next row, next column)
+                // Second triangle: Bottom-Right, Top-Right, Top-Left
+                triangles[triangleIndex + 3] = i + 1;               // Vertex at (x+1,y)
+                triangles[triangleIndex + 4] = i + resolution + 2; // Vertex at (x+1,y+1)
+                triangles[triangleIndex + 5] = i + resolution + 1; // Vertex at (x,y+1)
 
                 triangleIndex += 6; // Move to the next 6 slots for the next quad's triangles
             }
