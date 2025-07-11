@@ -13,24 +13,23 @@ public class PlanetGenerator : MonoBehaviour
     public int resolution = 64; // Controls the detail of the planet mesh. Higher = more detailed.
     public float radius = 1f;   // The base radius of the planet.
 
-    // This is the array that will hold all your different noise configurations
-    [Header("Noise Layers")]
-    public NoiseLayer[] noiseLayers;
-
-    // Global offset for terrain height
-    [Header("Global Terrain Settings")]
-    [Tooltip("Adjusts the overall height of the terrain relative to the base radius. Negative values will create oceans.")]
-    public float globalHeightOffset = 0f;
-
-    // Instance of your external ColorSettings class
-    [Header("Color Settings")]
-    public ColorSettings colorSettings; // This is the instance of your ColorSettings class
+    // References to the new ScriptableObject assets
+    [Header("Settings Assets")]
+    public ShapeSettings shapeSettings; // Reference to the ShapeSettings ScriptableObject
+    public ColorSettings colorSettings; // Reference to the ColorSettings ScriptableObject
 
     // --- Private References (Unity Components) ---
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
     private MeshCollider meshCollider;
     private Mesh mesh;
+
+    // --- NEW: Ocean Plane References ---
+    private GameObject oceanGameObject;
+    private MeshFilter oceanMeshFilter;
+    private MeshRenderer oceanMeshRenderer;
+    private Mesh oceanMesh;
+    // --- END NEW ---
 
     // To store the actual min/max elevation (distance from planet center) for shader
     private float minElevation;
@@ -79,35 +78,59 @@ public class PlanetGenerator : MonoBehaviour
     // relying on Awake() for runtime and the Context Menu for editor-time generation.
     void OnValidate()
     {
-        // If you need to ensure the mesh object exists for other editor-time logic (e.g., if debugging other parts
-        // of the script in the editor that rely on 'mesh' not being null), you can do a minimal check here.
-        // However, AVOID re-initializing components (like calling GetComponent or AddComponent)
-        // or assigning the mesh to meshFilter.sharedMesh here, as these trigger the SendMessage error.
         if (mesh == null)
         {
             mesh = new Mesh();
             mesh.name = "Generated Planet Mesh";
         }
-        // Update the biome texture whenever ColorSettings changes in the editor
-        UpdateBiomeTexture();
+
+        // Only update biome texture if ColorSettings is assigned
+        if (colorSettings != null)
+        {
+            UpdateBiomeTexture();
+        }
     }
 
     // --- Context Menu allows right-clicking the component in the Inspector to trigger a method ---
     [ContextMenu("Generate Planet Now")]
     public void GeneratePlanet()
     {
+        // Basic validation for settings assets
+        if (shapeSettings == null)
+        {
+            Debug.LogError("Shape Settings asset is not assigned to PlanetGenerator!");
+            return;
+        }
+        if (colorSettings == null)
+        {
+            Debug.LogError("Color Settings asset is not assigned to PlanetGenerator!");
+            return;
+        }
+
         Debug.Log("Generating Planet with Resolution: " + resolution + ", Radius: " + radius);
 
-        // Ensure mesh and meshFilter are initialized. This is crucial for the context menu
-        // if GeneratePlanet is called before Awake has run (e.g., right after script recompile).
+        // --- DEBUG LOGS TO VERIFY INPUTS FROM SCRIPTABLEOBJECTS ---
+        Debug.Log($"DEBUG: globalHeightOffset read from ShapeSettings: {shapeSettings.globalHeightOffset}");
+        if (shapeSettings.noiseLayers != null && shapeSettings.noiseLayers.Length > 0)
+        {
+            Debug.Log($"DEBUG: NoiseLayer[0] Strength read from ShapeSettings: {shapeSettings.noiseLayers[0].strength}");
+            Debug.Log($"DEBUG: NoiseLayer[0] MinValue read from ShapeSettings: {shapeSettings.noiseLayers[0].minValue}");
+        }
+        else
+        {
+            Debug.LogWarning("DEBUG: NoiseLayers array in ShapeSettings is null or empty. Cannot log specific noise layer values.");
+        }
+        // --- END NEW DEBUG LOGS ---
+
+        // Ensure mesh and meshFilter are initialized.
         if (meshFilter == null) meshFilter = GetComponent<MeshFilter>();
-        if (meshFilter == null) { Debug.LogError("MeshFilter not found!"); return; } // Safety check
+        if (meshFilter == null) { Debug.LogError("MeshFilter not found!"); return; }
 
         if (mesh == null)
         {
             mesh = new Mesh();
             mesh.name = "Generated Planet Mesh";
-            meshFilter.sharedMesh = mesh; // Ensure the filter has the mesh if we just created it
+            meshFilter.sharedMesh = mesh;
         }
 
         // Clear any previous mesh data
@@ -120,89 +143,85 @@ public class PlanetGenerator : MonoBehaviour
         SphereCreator.CreateSphereMesh(resolution, radius, out vertices, out triangles, out uvs);
 
         // Initialize min/max elevation before calculating displacement
-        // These will store the actual min/max distance from the planet's center.
         minElevation = float.MaxValue;
         maxElevation = float.MinValue;
 
         // Step 2: Apply MULTI-LAYERED FRACTAL BROWNIAN MOTION (FBM) noise to displace vertices
+        int logCount = 0;
+        int logMax = 10; // Log for the first 10 vertices
+
         for (int i = 0; i < vertices.Length; i++)
         {
-            Vector3 vertex = vertices[i]; // Store original vertex for normal direction
-            Vector3 normalDirection = vertex.normalized; // Direction away from planet center
+            Vector3 vertex = vertices[i];
+            Vector3 normalDirection = vertex.normalized;
 
-            float totalDisplacement = 0; // Accumulates total displacement from all layers (relative to base radius)
-            float firstLayerValue = 0; // To be used for masking by subsequent layers
+            float totalDisplacement = 0;
+            float firstLayerValue = 0;
 
-            // Iterate through each defined NoiseLayer
-            foreach (NoiseLayer noiseLayer in noiseLayers)
+            // Iterate through each defined NoiseLayer from ShapeSettings
+            foreach (NoiseLayer noiseLayer in shapeSettings.noiseLayers)
             {
                 if (!noiseLayer.enabled)
                 {
-                    continue; // Skip this layer if it's disabled
+                    continue;
                 }
 
                 float currentLayerNoise = 0;
-                float currentFrequency = noiseLayer.roughness; // Start frequency for this layer
-                float currentAmplitude = 1; // Start amplitude for this layer
-                float totalLayerAmplitude = 0; // Used for normalizing this layer's FBM output
+                float currentFrequency = noiseLayer.roughness;
+                float currentAmplitude = 1;
+                float totalLayerAmplitude = 0;
 
-                // Calculate FBM for this individual noise layer
                 for (int j = 0; j < noiseLayer.octaves; j++)
                 {
-                    // Sample point for this octave, combining normal direction, layer offset, and frequency
                     Vector3 samplePoint = (normalDirection + noiseLayer.offset) * currentFrequency;
-
                     float v = PerlinNoise3D.GenerateNoise(samplePoint.x, samplePoint.y, samplePoint.z);
 
-                    // Apply noise type specific modification
                     if (noiseLayer.noiseType == NoiseType.Ridge)
                     {
-                        // Ridge noise: maps original noise range [0,1] to [0,1] but with a sharper, creased effect.
-                        // v * 2 - 1 maps to [-1, 1]. Mathf.Abs makes it [0, 1]. 1 - Abs inverts it (valleys become peaks).
                         v = 1 - Mathf.Abs(v * 2 - 1);
                     }
-                    else // Standard noise (map 0-1 to -1 to 1 for displacement around the sphere surface)
+                    else
                     {
                         v = v * 2 - 1;
                     }
 
-                    currentLayerNoise += v * currentAmplitude; // Accumulate noise for this layer
-
-                    totalLayerAmplitude += currentAmplitude; // Track total amplitude for normalization
-                    currentAmplitude *= noiseLayer.persistence; // Decrease amplitude for next octave
-                    currentFrequency *= noiseLayer.lacunarity; // Increase frequency for next octave
+                    currentLayerNoise += v * currentAmplitude;
+                    totalLayerAmplitude += currentAmplitude;
+                    currentAmplitude *= noiseLayer.persistence;
+                    currentFrequency *= noiseLayer.lacunarity;
                 }
 
-                // Normalize the current layer's noise sum by its total accumulated amplitude
                 float normalizedLayerNoise = (totalLayerAmplitude == 0) ? 0 : currentLayerNoise / totalLayerAmplitude;
-
-                // Apply minValue: Ensure noise is always above a certain baseline (e.g., for ocean floor)
                 float finalLayerNoise = normalizedLayerNoise + noiseLayer.minValue;
 
-                // If this layer is designated as the mask, store its value.
-                // Assuming the first enabled layer found is the intended mask.
                 if (noiseLayer.useFirstLayerAsMask)
                 {
                     firstLayerValue = finalLayerNoise;
                 }
 
-                // Apply masking: If this layer uses the mask, only add its effect if the first layer's value is positive.
                 if (noiseLayer.useFirstLayerAsMask && firstLayerValue <= 0)
                 {
                     finalLayerNoise = 0;
                 }
 
-                // Accumulate this layer's contribution to the total displacement
                 totalDisplacement += finalLayerNoise * noiseLayer.strength;
             }
 
-            // Displace the vertex along its normal direction by the total accumulated displacement
-            // The actual vertex position is the base radius + total displacement * its normal direction.
-            // **** CRITICAL CHANGE HERE: Apply globalHeightOffset AFTER all noise layers ****
-            vertices[i] = vertex + normalDirection * (totalDisplacement + globalHeightOffset);
+            // Apply globalHeightOffset and totalDisplacement as a scaling factor to radius
+            vertices[i] = normalDirection * radius * (1 + totalDisplacement + shapeSettings.globalHeightOffset);
 
-            // Update min/max elevation based on the current vertex's *absolute distance from the origin*
-            float currentVertexHeight = vertices[i].magnitude; // This is the absolute distance from planet center
+            float currentVertexHeight = vertices[i].magnitude;
+
+            // --- NEW DETAILED DEBUG LOGS FOR VERTEX HEIGHTS ---
+            if (logCount < logMax)
+            {
+                Debug.Log($"DEBUG VERTEX {i}: Original Radius Vertex Magnitude: {vertex.magnitude}");
+                Debug.Log($"DEBUG VERTEX {i}: Total Displacement (from NoiseLayers): {totalDisplacement}");
+                Debug.Log($"DEBUG VERTEX {i}: Global Height Offset (from ShapeSettings): {shapeSettings.globalHeightOffset}");
+                Debug.Log($"DEBUG VERTEX {i}: Final Vertex Height (magnitude): {currentVertexHeight}");
+                logCount++;
+            }
+            // --- END NEW DETAILED DEBUG LOGS ---
 
             if (currentVertexHeight < minElevation)
             {
@@ -217,12 +236,11 @@ public class PlanetGenerator : MonoBehaviour
         // Step 3: Assign the modified data to the Mesh
         mesh.vertices = vertices;
         mesh.triangles = triangles;
-        mesh.uv = uvs; // Assign UVs for texturing
+        mesh.uv = uvs;
 
-        // IMPORTANT: Update the mesh's bounding box after changing vertices
         mesh.RecalculateBounds();
 
-        // --- CUSTOM NORMAL CALCULATION (REPLACES mesh.RecalculateNormals()) ---
+        // --- CUSTOM NORMAL CALCULATION ---
         Vector3[] normals = new Vector3[vertices.Length];
         for (int i = 0; i < triangles.Length; i += 3)
         {
@@ -248,13 +266,9 @@ public class PlanetGenerator : MonoBehaviour
         mesh.normals = normals;
         // --- END CUSTOM NORMAL CALCULATION ---
 
-        // Optional: Recalculate tangents if you plan to use normal maps in your shader.
-        // mesh.RecalculateTangents();
-
-        // Step 5: Assign the mesh to the MeshFilter (already done in Awake, but good to ensure)
         meshFilter.sharedMesh = mesh;
 
-        // NEW: Assign the material and pass elevation data and biome texture to it
+        // Assign the material and pass elevation data and biome texture to it
         if (meshRenderer == null) meshRenderer = GetComponent<MeshRenderer>();
         if (meshRenderer != null && colorSettings != null && colorSettings.planetMaterial != null)
         {
@@ -262,15 +276,13 @@ public class PlanetGenerator : MonoBehaviour
 
             // Pass the absolute heights and radius to the shader
             meshRenderer.sharedMaterial.SetFloat("_Radius", radius);
-            meshRenderer.sharedMaterial.SetFloat("_MinHeight", minElevation); // Pass calculated min height
-            meshRenderer.sharedMaterial.SetFloat("_MaxHeight", maxElevation); // Pass calculated max height
-            meshRenderer.sharedMaterial.SetColor("_OceanColor", colorSettings.oceanColor); // Pass ocean color
+            meshRenderer.sharedMaterial.SetFloat("_MinHeight", minElevation);
+            meshRenderer.sharedMaterial.SetFloat("_MaxHeight", maxElevation);
+            meshRenderer.sharedMaterial.SetColor("_OceanColor", colorSettings.oceanColor);
 
-            // Update and assign the biome texture
             UpdateBiomeTexture();
             if (biomeTexture != null)
             {
-                // "_BiomeTexture" is the property name in your Shader Graph for the biome texture.
                 meshRenderer.sharedMaterial.SetTexture("_BiomeTexture", biomeTexture);
             }
             else
@@ -294,6 +306,10 @@ public class PlanetGenerator : MonoBehaviour
             meshCollider.sharedMesh = mesh;
         }
 
+        // --- NEW: Ocean Plane Generation ---
+        GenerateOceanPlane();
+        // --- END NEW ---
+
         Debug.Log($"PlanetGenerator: Mesh assigned. Vertices: {mesh.vertexCount}, Triangles: {mesh.triangles.Length / 3}");
     }
 
@@ -313,31 +329,24 @@ public class PlanetGenerator : MonoBehaviour
             return;
         }
 
-        // Determine the resolution of the biome texture.
-        // We'll make it 1 pixel wide and as tall as the number of biomes.
-        // Or, for more general purpose, a fixed width (e.g., 256) and 1 pixel high.
-        // Let's use 256x1 for a simple gradient-like lookup.
-        int textureResolution = 256; // Fixed resolution for the biome lookup texture
+        int textureResolution = 256;
 
-        // Create a new texture if it doesn't exist or if resolution changed
         if (biomeTexture == null || biomeTexture.width != textureResolution)
         {
-            if (biomeTexture != null) DestroyImmediate(biomeTexture); // Destroy old texture if resolution changed
+            if (biomeTexture != null) DestroyImmediate(biomeTexture);
             biomeTexture = new Texture2D(textureResolution, 1, TextureFormat.RGBA32, false);
-            biomeTexture.filterMode = FilterMode.Bilinear; // Smooth transitions
-            biomeTexture.wrapMode = TextureWrapMode.Clamp;  // Prevent repeating
+            biomeTexture.filterMode = FilterMode.Bilinear;
+            biomeTexture.wrapMode = TextureWrapMode.Clamp;
         }
 
         Color[] pixels = new Color[textureResolution];
 
-        // Sort biomes by startHeight to ensure correct blending order
         System.Array.Sort(colorSettings.biomes, (b1, b2) => b1.startHeight.CompareTo(b2.startHeight));
 
-        // Populate the texture with colors based on biome blending
         for (int i = 0; i < textureResolution; i++)
         {
             float normalizedHeight = (float)i / (textureResolution - 1);
-            Color finalColor = colorSettings.oceanColor; // Start with ocean color as base
+            Color finalColor = colorSettings.oceanColor;
 
             for (int b = 0; b < colorSettings.biomes.Length; b++)
             {
@@ -345,27 +354,84 @@ public class PlanetGenerator : MonoBehaviour
                 float startHeight = biome.startHeight;
                 float blendAmount = biome.blendAmount;
 
-                // Calculate the blend factor for this biome
-                // This makes the biome blend in smoothly over its blendAmount range
                 float blendFactor = Mathf.Clamp01((normalizedHeight - startHeight) / blendAmount);
-
-                // Lerp (linear interpolate) between the current finalColor and the biome's color
                 finalColor = Color.Lerp(finalColor, biome.color, blendFactor);
             }
             pixels[i] = finalColor;
         }
 
         biomeTexture.SetPixels(pixels);
-        biomeTexture.Apply(); // Apply pixel changes to the texture
+        biomeTexture.Apply();
     }
 
-    // Clean up the generated texture when the object is destroyed
+    /// <summary>
+    /// Creates or updates a separate GameObject and mesh for the ocean plane.
+    /// </summary>
+    void GenerateOceanPlane()
+    {
+        // Find or create the ocean GameObject as a child of this planet
+        if (oceanGameObject == null)
+        {
+            oceanGameObject = new GameObject("Ocean");
+            oceanGameObject.transform.parent = transform; // Make it a child of the planet
+            oceanGameObject.transform.localPosition = Vector3.zero; // Center it on the planet
+            oceanGameObject.transform.localRotation = Quaternion.identity;
+            oceanGameObject.transform.localScale = Vector3.one;
+
+            oceanMeshFilter = oceanGameObject.AddComponent<MeshFilter>();
+            oceanMeshRenderer = oceanGameObject.AddComponent<MeshRenderer>();
+            oceanMesh = new Mesh();
+            oceanMesh.name = "Generated Ocean Mesh";
+            oceanMeshFilter.sharedMesh = oceanMesh;
+        }
+
+        // Clear any previous ocean mesh data
+        oceanMesh.Clear();
+
+        // Generate a simple sphere mesh for the ocean
+        Vector3[] oceanVertices;
+        int[] oceanTriangles;
+        Vector2[] oceanUVs;
+        // The ocean should be a perfect sphere at the planet's radius (or slightly above/below if desired)
+        // For a true "sea level", we'll make it slightly larger than the lowest terrain point
+        // and let the shader handle the exact visual level.
+        SphereCreator.CreateSphereMesh(resolution, radius, out oceanVertices, out oceanTriangles, out oceanUVs);
+
+        // Assign ocean mesh data
+        oceanMesh.vertices = oceanVertices;
+        oceanMesh.triangles = oceanTriangles;
+        oceanMesh.uv = oceanUVs;
+        oceanMesh.RecalculateNormals(); // Simple normals are fine for a sphere
+        oceanMesh.RecalculateBounds();
+
+        // Assign the ocean material
+        if (colorSettings != null && colorSettings.oceanMaterial != null) // Check for oceanMaterial now
+        {
+            oceanMeshRenderer.sharedMaterial = colorSettings.oceanMaterial; // Assign the dedicated ocean material
+
+            // Pass the radius to the ocean shader so it knows its scale
+            oceanMeshRenderer.sharedMaterial.SetFloat("_Radius", radius);
+            // Pass the ocean color from ColorSettings to the ocean material's _Color property
+            oceanMeshRenderer.sharedMaterial.SetColor("_Color", colorSettings.oceanColor);
+        }
+        else
+        {
+            Debug.LogWarning("Ocean Material not assigned in Color Settings for " + gameObject.name + "!");
+        }
+    }
+
+    // Clean up the generated texture and ocean GameObject when the object is destroyed
     void OnDestroy()
     {
         if (biomeTexture != null)
         {
-            DestroyImmediate(biomeTexture); // Destroy the texture asset immediately
+            DestroyImmediate(biomeTexture);
             biomeTexture = null;
+        }
+        if (oceanGameObject != null)
+        {
+            DestroyImmediate(oceanGameObject); // Destroy the ocean child GameObject
+            oceanGameObject = null;
         }
     }
 }
