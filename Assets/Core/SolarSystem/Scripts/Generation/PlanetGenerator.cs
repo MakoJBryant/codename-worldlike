@@ -13,6 +13,10 @@ public class PlanetGenerator : MonoBehaviour
     public int resolution = 64; // Controls the detail of the planet mesh. Higher = more detailed.
     public float radius = 1f;   // The base radius of the planet.
 
+    // NEW: Public field for the scene's main directional light (now optional for manual assignment)
+    [Tooltip("Assign your scene's main Directional Light (Sun) here. If left unassigned, the script will try to find one named 'Directional Light'.")]
+    public Light sceneSunLight;
+
     // References to the new ScriptableObject assets
     [Header("Settings Assets")]
     public ShapeSettings shapeSettings; // Reference to the ShapeSettings ScriptableObject
@@ -24,11 +28,18 @@ public class PlanetGenerator : MonoBehaviour
     private MeshCollider meshCollider;
     private Mesh mesh;
 
-    // --- NEW: Ocean Plane References ---
+    // --- Ocean Plane References ---
     private GameObject oceanGameObject;
     private MeshFilter oceanMeshFilter;
     private MeshRenderer oceanMeshRenderer;
     private Mesh oceanMesh;
+
+    // --- Atmosphere Plane References ---
+    private GameObject atmosphereGameObject;
+    private MeshFilter atmosphereMeshFilter;
+    private MeshRenderer atmosphereMeshRenderer;
+    private Mesh atmosphereMesh;
+    private AtmosphereController atmosphereController; // Reference to your existing AtmosphereController
     // --- END NEW ---
 
     // To store the actual min/max elevation (distance from planet center) for shader
@@ -306,9 +317,11 @@ public class PlanetGenerator : MonoBehaviour
             meshCollider.sharedMesh = mesh;
         }
 
-        // --- NEW: Ocean Plane Generation ---
+        // --- Ocean Plane Generation ---
         GenerateOceanPlane();
-        // --- END NEW ---
+        // --- Atmosphere Plane Generation ---
+        GenerateAtmospherePlane();
+        // --- END Atmosphere Plane Generation ---
 
         Debug.Log($"PlanetGenerator: Mesh assigned. Vertices: {mesh.vertexCount}, Triangles: {mesh.triangles.Length / 3}");
     }
@@ -331,6 +344,7 @@ public class PlanetGenerator : MonoBehaviour
 
         int textureResolution = 256;
 
+        // Corrected: Use biomeTexture.width for comparison
         if (biomeTexture == null || biomeTexture.width != textureResolution)
         {
             if (biomeTexture != null) DestroyImmediate(biomeTexture);
@@ -370,19 +384,34 @@ public class PlanetGenerator : MonoBehaviour
     void GenerateOceanPlane()
     {
         // Find or create the ocean GameObject as a child of this planet
+        // Check if oceanGameObject exists and is still valid (not destroyed externally)
         if (oceanGameObject == null)
         {
-            oceanGameObject = new GameObject("Ocean");
-            oceanGameObject.transform.parent = transform; // Make it a child of the planet
-            oceanGameObject.transform.localPosition = Vector3.zero; // Center it on the planet
-            oceanGameObject.transform.localRotation = Quaternion.identity;
-            oceanGameObject.transform.localScale = Vector3.one;
+            // Try to find an existing child named "Ocean"
+            Transform existingOceanTransform = transform.Find("Ocean");
+            if (existingOceanTransform != null)
+            {
+                oceanGameObject = existingOceanTransform.gameObject;
+                oceanMeshFilter = oceanGameObject.GetComponent<MeshFilter>();
+                oceanMeshRenderer = oceanGameObject.GetComponent<MeshRenderer>();
+                oceanMesh = oceanMeshFilter.sharedMesh;
+                // Ensure AtmosphereController is also present if reusing
+                atmosphereController = oceanGameObject.GetComponent<AtmosphereController>(); // This line is incorrect, should be on Atmosphere object
+            }
+            else
+            {
+                oceanGameObject = new GameObject("Ocean");
+                oceanGameObject.transform.parent = transform; // Make it a child of the planet
+                oceanGameObject.transform.localPosition = Vector3.zero; // Center it on the planet
+                oceanGameObject.transform.localRotation = Quaternion.identity;
+                oceanGameObject.transform.localScale = Vector3.one;
 
-            oceanMeshFilter = oceanGameObject.AddComponent<MeshFilter>();
-            oceanMeshRenderer = oceanGameObject.AddComponent<MeshRenderer>();
-            oceanMesh = new Mesh();
-            oceanMesh.name = "Generated Ocean Mesh";
-            oceanMeshFilter.sharedMesh = oceanMesh;
+                oceanMeshFilter = oceanGameObject.AddComponent<MeshFilter>();
+                oceanMeshRenderer = oceanGameObject.AddComponent<MeshRenderer>();
+                oceanMesh = new Mesh();
+                oceanMesh.name = "Generated Ocean Mesh";
+                oceanMeshFilter.sharedMesh = oceanMesh;
+            }
         }
 
         // Clear any previous ocean mesh data
@@ -392,9 +421,6 @@ public class PlanetGenerator : MonoBehaviour
         Vector3[] oceanVertices;
         int[] oceanTriangles;
         Vector2[] oceanUVs;
-        // The ocean should be a perfect sphere at the planet's radius (or slightly above/below if desired)
-        // For a true "sea level", we'll make it slightly larger than the lowest terrain point
-        // and let the shader handle the exact visual level.
         SphereCreator.CreateSphereMesh(resolution, radius, out oceanVertices, out oceanTriangles, out oceanUVs);
 
         // Assign ocean mesh data
@@ -420,7 +446,105 @@ public class PlanetGenerator : MonoBehaviour
         }
     }
 
-    // Clean up the generated texture and ocean GameObject when the object is destroyed
+    /// <summary>
+    /// NEW: Creates or updates a separate GameObject and mesh for the atmosphere.
+    /// </summary>
+    void GenerateAtmospherePlane()
+    {
+        // Find or create the atmosphere GameObject as a child of this planet
+        // Check if atmosphereGameObject exists and is still valid
+        if (atmosphereGameObject == null)
+        {
+            // Try to find an existing child named "Atmosphere"
+            Transform existingAtmosphereTransform = transform.Find("Atmosphere");
+            if (existingAtmosphereTransform != null)
+            {
+                atmosphereGameObject = existingAtmosphereTransform.gameObject;
+                atmosphereMeshFilter = atmosphereGameObject.GetComponent<MeshFilter>();
+                atmosphereMeshRenderer = atmosphereGameObject.GetComponent<MeshRenderer>();
+                atmosphereMesh = atmosphereMeshFilter.sharedMesh;
+                atmosphereController = atmosphereGameObject.GetComponent<AtmosphereController>();
+            }
+            else
+            {
+                atmosphereGameObject = new GameObject("Atmosphere");
+                atmosphereGameObject.transform.parent = transform; // Make it a child of the planet
+                atmosphereGameObject.transform.localPosition = Vector3.zero; // Center it on the planet
+                atmosphereGameObject.transform.localRotation = Quaternion.identity;
+                atmosphereGameObject.transform.localScale = Vector3.one;
+
+                atmosphereMeshFilter = atmosphereGameObject.AddComponent<MeshFilter>();
+                atmosphereMeshRenderer = atmosphereGameObject.AddComponent<MeshRenderer>();
+                atmosphereMesh = new Mesh();
+                atmosphereMesh.name = "Generated Atmosphere Mesh";
+                atmosphereMeshFilter.sharedMesh = atmosphereMesh;
+                // NEW: Add the AtmosphereController component
+                atmosphereController = atmosphereGameObject.AddComponent<AtmosphereController>();
+            }
+        }
+
+        // Clear any previous atmosphere mesh data
+        atmosphereMesh.Clear();
+
+        // Generate a simple sphere mesh for the atmosphere
+        Vector3[] atmosphereVertices;
+        int[] atmosphereTriangles;
+        Vector2[] atmosphereUVs;
+        // The atmosphere should be a perfect sphere, slightly larger than the planet's radius.
+        // We'll use a slightly larger radius for the atmosphere to ensure it encompasses the planet.
+        float atmosphereRadius = radius * 1.05f; // 5% larger than the planet's radius for now.
+        SphereCreator.CreateSphereMesh(resolution, atmosphereRadius, out atmosphereVertices, out atmosphereTriangles, out atmosphereUVs);
+
+        // Assign atmosphere mesh data
+        atmosphereMesh.vertices = atmosphereVertices;
+        atmosphereMesh.triangles = atmosphereTriangles;
+        atmosphereMesh.uv = atmosphereUVs;
+        atmosphereMesh.RecalculateNormals(); // Simple normals are fine for a sphere
+        atmosphereMesh.RecalculateBounds();
+
+        // Assign the atmosphere material
+        if (colorSettings != null && colorSettings.atmosphereMaterial != null) // Check for atmosphereMaterial now
+        {
+            atmosphereMeshRenderer.sharedMaterial = colorSettings.atmosphereMaterial; // Assign the dedicated atmosphere material
+
+            // Pass the atmosphere radius to the shader via the AtmosphereController
+            // The AtmosphereController will handle setting _SunDirection and potentially _AtmosphereRadius
+            // So, we just need to ensure its material reference is set.
+            if (atmosphereController != null)
+            {
+                atmosphereController.atmosphereMaterial = colorSettings.atmosphereMaterial;
+                // NEW: Pass the scene's main directional light to the AtmosphereController
+                // If sceneSunLight is null, try to find it programmatically.
+                if (sceneSunLight == null)
+                {
+                    GameObject sunGO = GameObject.Find("Directional Light"); // Common default name for Unity's directional light
+                    if (sunGO != null)
+                    {
+                        sceneSunLight = sunGO.GetComponent<Light>();
+                        if (sceneSunLight == null)
+                        {
+                            Debug.LogWarning("Directional Light GameObject found but no Light component on it!");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogWarning("Directional Light GameObject not found in scene for automatic assignment!");
+                    }
+                }
+                atmosphereController.sunLight = sceneSunLight; // Assign the found/assigned light
+                // If your S_Atmosphere shader graph uses a _Radius property, you'd pass it here.
+                // For now, we assume AtmosphereController or the shader itself handles its scale.
+                // If you want the shader to know the planet's base radius, you could pass it:
+                // atmosphereMeshRenderer.sharedMaterial.SetFloat("_PlanetRadius", radius);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("Atmosphere Material not assigned in Color Settings for " + gameObject.name + "!");
+        }
+    }
+
+    // Clean up the generated texture and ocean/atmosphere GameObjects when the object is destroyed
     void OnDestroy()
     {
         if (biomeTexture != null)
@@ -432,6 +556,12 @@ public class PlanetGenerator : MonoBehaviour
         {
             DestroyImmediate(oceanGameObject); // Destroy the ocean child GameObject
             oceanGameObject = null;
+        }
+        // NEW: Destroy atmosphere GameObject
+        if (atmosphereGameObject != null)
+        {
+            DestroyImmediate(atmosphereGameObject);
+            atmosphereGameObject = null;
         }
     }
 }

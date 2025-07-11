@@ -6,7 +6,8 @@ namespace MakoJBryant.SolarSystem.Generation
     public class ColorSettings : ScriptableObject
     {
         public Material planetMaterial; // Reference to your S_PlanetSurface material
-        public Material oceanMaterial;  // NEW: Reference to your OceanMaterial
+        public Material oceanMaterial;  // Reference to your OceanMaterial
+        public Material atmosphereMaterial; // Reference to your AtmosphereMaterial
         public Color oceanColor;        // Base ocean color (still used for biome texture)
 
         public Biome[] biomes;

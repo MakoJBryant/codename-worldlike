@@ -12,5 +12,35 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 26b1c3db4b4b4ef47bfef5b400823753, type: 3}
   m_Name: EarthShapeSettings
   m_EditorClassIdentifier: 
-  globalHeightOffset: 0
-  noiseLayers: []
+  globalHeightOffset: 0.1
+  noiseLayers:
+  - enabled: 1
+    strength: 0.2
+    roughness: 1
+    octaves: 3
+    persistence: 0.5
+    lacunarity: 2
+    offset: {x: 0, y: 0, z: 0}
+    minValue: -0.5
+    noiseType: 0
+    useFirstLayerAsMask: 0
+  - enabled: 1
+    strength: 0.1
+    roughness: 2
+    octaves: 4
+    persistence: 0.5
+    lacunarity: 2
+    offset: {x: 100, y: 50, z: 200}
+    minValue: 0
+    noiseType: 0
+    useFirstLayerAsMask: 0
+  - enabled: 1
+    strength: 0.05
+    roughness: 4
+    octaves: 5
+    persistence: 0.5
+    lacunarity: 2
+    offset: {x: 300, y: 150, z: 100}
+    minValue: 0
+    noiseType: 1
+    useFirstLayerAsMask: 0
