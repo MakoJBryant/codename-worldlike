@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 2031326806639344806}
   - component: {fileID: 6750862924495264955}
   - component: {fileID: 8398077441142040203}
+  - component: {fileID: 228457803583743338}
   m_Layer: 0
   m_Name: P_Planet_Default
   m_TagString: Untagged
@@ -122,8 +123,85 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4e35ed53704f2114cbcc703533cebfaa, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  resolution: 64
-  radius: 1
-  noiseStrength: 1
-  noiseRoughness: 1
-  noiseOffset: {x: 0, y: 0, z: 0}
+  resolution: 100
+  radius: 0.5
+  noiseLayers:
+  - enabled: 1
+    strength: 0.5
+    roughness: 1
+    octaves: 6
+    persistence: 0.5
+    lacunarity: 1
+    offset: {x: 4545, y: 212, z: 4545}
+    noiseType: 0
+    minValue: -0.3
+    useFirstLayerAsMask: 0
+  - enabled: 1
+    strength: 2
+    roughness: 2
+    octaves: 6
+    persistence: 0.5
+    lacunarity: 2
+    offset: {x: 5000, y: 1500, z: 4000}
+    noiseType: 1
+    minValue: 0
+    useFirstLayerAsMask: 1
+  - enabled: 1
+    strength: 0.2
+    roughness: 4
+    octaves: 6
+    persistence: 0.5
+    lacunarity: 2
+    offset: {x: 8000, y: 7000, z: 6000}
+    noiseType: 0
+    minValue: 0
+    useFirstLayerAsMask: 1
+  globalHeightOffset: 0
+  colorSettings:
+    planetMaterial: {fileID: 2100000, guid: 54d5863559ebab3458cefa95a8a1d6eb, type: 2}
+    biomeGradient:
+      serializedVersion: 2
+      key0: {r: 0, g: 0.039215688, b: 0.19607843, a: 1}
+      key1: {r: 0, g: 0.39215687, b: 0.78431374, a: 1}
+      key2: {r: 0.19607843, g: 0.5882353, b: 0.19607843, a: 0}
+      key3: {r: 0.078431375, g: 0.39215687, b: 0.078431375, a: 0}
+      key4: {r: 0.39215687, g: 0.3137255, b: 0.27450982, a: 0}
+      key5: {r: 0.5882353, g: 0.5882353, b: 0.5882353, a: 0}
+      key6: {r: 0, g: 0, b: 0, a: 0}
+      key7: {r: 0, g: 0, b: 0, a: 0}
+      ctime0: 0
+      ctime1: 6554
+      ctime2: 13107
+      ctime3: 32768
+      ctime4: 45875
+      ctime5: 65535
+      ctime6: 0
+      ctime7: 0
+      atime0: 0
+      atime1: 65535
+      atime2: 0
+      atime3: 0
+      atime4: 0
+      atime5: 0
+      atime6: 0
+      atime7: 0
+      m_Mode: 0
+      m_ColorSpace: -1
+      m_NumColorKeys: 6
+      m_NumAlphaKeys: 2
+    gradientResolution: 256
+--- !u!114 &228457803583743338
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2311847237677142913}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 77ad581597554cb4b8e437e5537920cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  gravityStrength: 9.81
+  attractedBodies:
+  - {fileID: 0}
