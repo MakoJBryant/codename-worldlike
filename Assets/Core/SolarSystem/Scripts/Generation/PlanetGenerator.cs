@@ -36,6 +36,9 @@ public class PlanetGenerator : MonoBehaviour
     private float minElevation;
     private float maxElevation;
 
+    // NEW: Texture to store biome gradient data
+    private Texture2D biomeTexture;
+
     // --- Awake is called when the script instance is being loaded ---
     void Awake()
     {
@@ -85,8 +88,8 @@ public class PlanetGenerator : MonoBehaviour
             mesh = new Mesh();
             mesh.name = "Generated Planet Mesh";
         }
-        // No need to update gradient texture here anymore as ColorSettings now uses Biomes array.
-        // The material properties will be set when GeneratePlanet is called.
+        // Update the biome texture whenever ColorSettings changes in the editor
+        UpdateBiomeTexture();
     }
 
     // --- Context Menu allows right-clicking the component in the Inspector to trigger a method ---
@@ -251,7 +254,7 @@ public class PlanetGenerator : MonoBehaviour
         // Step 5: Assign the mesh to the MeshFilter (already done in Awake, but good to ensure)
         meshFilter.sharedMesh = mesh;
 
-        // NEW: Assign the material and pass elevation data and biome data to it
+        // NEW: Assign the material and pass elevation data and biome texture to it
         if (meshRenderer == null) meshRenderer = GetComponent<MeshRenderer>();
         if (meshRenderer != null && colorSettings != null && colorSettings.planetMaterial != null)
         {
@@ -263,30 +266,16 @@ public class PlanetGenerator : MonoBehaviour
             meshRenderer.sharedMaterial.SetFloat("_MaxHeight", maxElevation); // Pass calculated max height
             meshRenderer.sharedMaterial.SetColor("_OceanColor", colorSettings.oceanColor); // Pass ocean color
 
-            // Pass biome data to the shader
-            if (colorSettings.biomes != null && colorSettings.biomes.Length > 0)
+            // Update and assign the biome texture
+            UpdateBiomeTexture();
+            if (biomeTexture != null)
             {
-                // Create arrays to hold biome data for the shader
-                Vector4[] biomeColors = new Vector4[colorSettings.biomes.Length];
-                float[] biomeStartHeights = new float[colorSettings.biomes.Length];
-                float[] biomeBlendAmounts = new float[colorSettings.biomes.Length];
-
-                for (int b = 0; b < colorSettings.biomes.Length; b++)
-                {
-                    biomeColors[b] = colorSettings.biomes[b].color;
-                    biomeStartHeights[b] = colorSettings.biomes[b].startHeight;
-                    biomeBlendAmounts[b] = colorSettings.biomes[b].blendAmount;
-                }
-
-                meshRenderer.sharedMaterial.SetInt("_BiomeCount", colorSettings.biomes.Length);
-                meshRenderer.sharedMaterial.SetVectorArray("_BiomeColors", biomeColors);
-                meshRenderer.sharedMaterial.SetFloatArray("_BiomeStartHeights", biomeStartHeights);
-                meshRenderer.sharedMaterial.SetFloatArray("_BiomeBlendAmounts", biomeBlendAmounts);
+                // "_BiomeTexture" is the property name in your Shader Graph for the biome texture.
+                meshRenderer.sharedMaterial.SetTexture("_BiomeTexture", biomeTexture);
             }
             else
             {
-                Debug.LogWarning("No biomes defined in Color Settings for PlanetGenerator on " + gameObject.name);
-                meshRenderer.sharedMaterial.SetInt("_BiomeCount", 0); // Ensure shader knows there are no biomes
+                Debug.LogWarning("Biome Texture could not be generated for " + gameObject.name + "!");
             }
 
             Debug.Log($"Shader parameters set: Radius={radius}, MinHeight={minElevation}, MaxHeight={maxElevation}");
@@ -308,9 +297,75 @@ public class PlanetGenerator : MonoBehaviour
         Debug.Log($"PlanetGenerator: Mesh assigned. Vertices: {mesh.vertexCount}, Triangles: {mesh.triangles.Length / 3}");
     }
 
+    /// <summary>
+    /// Generates or updates a Texture2D that encodes biome colors and their start heights.
+    /// This texture is then passed to the shader for biome blending.
+    /// </summary>
+    void UpdateBiomeTexture()
+    {
+        if (colorSettings == null || colorSettings.biomes == null || colorSettings.biomes.Length == 0)
+        {
+            if (biomeTexture != null)
+            {
+                DestroyImmediate(biomeTexture); // Clean up old texture
+                biomeTexture = null;
+            }
+            return;
+        }
+
+        // Determine the resolution of the biome texture.
+        // We'll make it 1 pixel wide and as tall as the number of biomes.
+        // Or, for more general purpose, a fixed width (e.g., 256) and 1 pixel high.
+        // Let's use 256x1 for a simple gradient-like lookup.
+        int textureResolution = 256; // Fixed resolution for the biome lookup texture
+
+        // Create a new texture if it doesn't exist or if resolution changed
+        if (biomeTexture == null || biomeTexture.width != textureResolution)
+        {
+            if (biomeTexture != null) DestroyImmediate(biomeTexture); // Destroy old texture if resolution changed
+            biomeTexture = new Texture2D(textureResolution, 1, TextureFormat.RGBA32, false);
+            biomeTexture.filterMode = FilterMode.Bilinear; // Smooth transitions
+            biomeTexture.wrapMode = TextureWrapMode.Clamp;  // Prevent repeating
+        }
+
+        Color[] pixels = new Color[textureResolution];
+
+        // Sort biomes by startHeight to ensure correct blending order
+        System.Array.Sort(colorSettings.biomes, (b1, b2) => b1.startHeight.CompareTo(b2.startHeight));
+
+        // Populate the texture with colors based on biome blending
+        for (int i = 0; i < textureResolution; i++)
+        {
+            float normalizedHeight = (float)i / (textureResolution - 1);
+            Color finalColor = colorSettings.oceanColor; // Start with ocean color as base
+
+            for (int b = 0; b < colorSettings.biomes.Length; b++)
+            {
+                ColorSettings.Biome biome = colorSettings.biomes[b];
+                float startHeight = biome.startHeight;
+                float blendAmount = biome.blendAmount;
+
+                // Calculate the blend factor for this biome
+                // This makes the biome blend in smoothly over its blendAmount range
+                float blendFactor = Mathf.Clamp01((normalizedHeight - startHeight) / blendAmount);
+
+                // Lerp (linear interpolate) between the current finalColor and the biome's color
+                finalColor = Color.Lerp(finalColor, biome.color, blendFactor);
+            }
+            pixels[i] = finalColor;
+        }
+
+        biomeTexture.SetPixels(pixels);
+        biomeTexture.Apply(); // Apply pixel changes to the texture
+    }
+
     // Clean up the generated texture when the object is destroyed
     void OnDestroy()
     {
-        // No biomeGradientTexture to clean up anymore
+        if (biomeTexture != null)
+        {
+            DestroyImmediate(biomeTexture); // Destroy the texture asset immediately
+            biomeTexture = null;
+        }
     }
 }
