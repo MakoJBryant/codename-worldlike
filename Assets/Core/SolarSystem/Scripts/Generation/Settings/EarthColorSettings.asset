@@ -13,21 +13,20 @@ MonoBehaviour:
   m_Name: EarthColorSettings
   m_EditorClassIdentifier: 
   planetMaterial: {fileID: 2100000, guid: 54d5863559ebab3458cefa95a8a1d6eb, type: 2}
-  oceanMaterial: {fileID: 2100000, guid: bb9d1034c4ff4ef468bbaa3f8d95158d, type: 2}
-  atmosphereMaterial: {fileID: 2100000, guid: 1b34f0db303c52745a4ed2ed4749084e, type: 2}
+  oceanMaterial: {fileID: 2100000, guid: 1c2014b1ece47f240862739c5669a6c6, type: 2}
   oceanColor: {r: 0, g: 0.050980393, b: 0.4, a: 0}
   biomes:
   - name: Deep Ocean
     color: {r: 0, g: 0.003921569, b: 0.050980393, a: 1}
     startHeight: 0
     blendAmount: 0.45
-  - name: Shallow Ocean
-    color: {r: 0.050980393, g: 0.2, b: 0.8, a: 1}
-    startHeight: 0.45
+  - name: Sandy Beaches
+    color: {r: 0.5754717, g: 0.49854937, b: 0.16286936, a: 1}
+    startHeight: 0.475
     blendAmount: 0.025
   - name: Land / Grasslands
     color: {r: 0.09803922, g: 0.6, b: 0.09803922, a: 1}
-    startHeight: 0.475
+    startHeight: 0.5
     blendAmount: 0.05
   - name: Mountains / Rock
     color: {r: 0.4, g: 0.34901962, b: 0.29803923, a: 1}
@@ -37,3 +36,9 @@ MonoBehaviour:
     color: {r: 1, g: 1, b: 1, a: 1}
     startHeight: 0.8
     blendAmount: 0.15
+  atmosphereMaterial: {fileID: 2100000, guid: 1b34f0db303c52745a4ed2ed4749084e, type: 2}
+  atmosphereColor: {r: 0.2, g: 0.4, b: 1, a: 1}
+  atmosphereDensity: 1
+  atmospherePower: 5
+  atmosphereAmbientLightInfluence: 0.1
+  atmosphereRimPower: 3

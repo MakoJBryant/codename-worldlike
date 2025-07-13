@@ -4,11 +4,12 @@ using MakoJBryant.SolarSystem.Generation;
 [ExecuteInEditMode]
 public class PlanetGenerator : MonoBehaviour
 {
-    [Range(2, 256)]
-    public int resolution = 64;
+    [Range(2, 256)] public int resolution = 64;
     public float radius = 1f;
 
-    [Tooltip("Assign your scene's main Directional Light (Sun) here. If left unassigned, the script will try to find one tagged 'Sun' or the first Light in the scene.")]
+    [Range(0f, 1f), Tooltip("Controls ocean height between min and max elevation.")]
+    public float seaLevel = 0.5f;
+
     public Light sceneSunLight;
 
     [Header("Settings Assets")]
@@ -41,16 +42,20 @@ public class PlanetGenerator : MonoBehaviour
         meshRenderer = GetComponent<MeshRenderer>() ?? gameObject.AddComponent<MeshRenderer>();
         meshCollider = GetComponent<MeshCollider>() ?? gameObject.AddComponent<MeshCollider>();
 
-        mesh ??= new Mesh { name = "Generated Planet Mesh" };
-        if (meshFilter.sharedMesh != mesh) meshFilter.sharedMesh = mesh;
+        if (mesh == null)
+            mesh = new Mesh { name = "Generated Planet Mesh" };
 
+        meshFilter.sharedMesh = mesh;
         GeneratePlanet();
     }
 
     void OnValidate()
     {
-        mesh ??= new Mesh { name = "Generated Planet Mesh" };
-        if (colorSettings != null) UpdateBiomeTexture();
+        if (mesh == null)
+            mesh = new Mesh { name = "Generated Planet Mesh" };
+
+        if (colorSettings != null)
+            UpdateBiomeTexture();
     }
 
     [ContextMenu("Generate Planet Now")]
@@ -58,13 +63,11 @@ public class PlanetGenerator : MonoBehaviour
     {
         if (shapeSettings == null || colorSettings == null)
         {
-            Debug.LogError("Missing ShapeSettings or ColorSettings asset.");
+            Debug.LogError("Missing ShapeSettings or ColorSettings");
             return;
         }
 
-        mesh ??= new Mesh { name = "Generated Planet Mesh" };
         mesh.Clear();
-
         SphereCreator.CreateSphereMesh(resolution, radius, out Vector3[] vertices, out int[] triangles, out Vector2[] uvs);
 
         minElevation = float.MaxValue;
@@ -73,213 +76,205 @@ public class PlanetGenerator : MonoBehaviour
         for (int i = 0; i < vertices.Length; i++)
         {
             Vector3 normal = vertices[i].normalized;
-            float displacement = 0f;
-            float mask = 1f;
+            float totalDisplacement = 0;
+            float firstLayerValue = 0;
 
-            foreach (NoiseLayer noise in shapeSettings.noiseLayers)
+            foreach (NoiseLayer layer in shapeSettings.noiseLayers)
             {
-                if (!noise.enabled) continue;
+                if (!layer.enabled) continue;
 
-                float frequency = noise.roughness;
-                float amplitude = 1f;
-                float layerNoise = 0f;
-                float totalAmplitude = 0f;
+                float noiseSum = 0;
+                float frequency = layer.roughness;
+                float amplitude = 1;
+                float amplitudeSum = 0;
 
-                for (int o = 0; o < noise.octaves; o++)
+                for (int j = 0; j < layer.octaves; j++)
                 {
-                    Vector3 sample = (normal + noise.offset) * frequency;
-                    float v = PerlinNoise3D.GenerateNoise(sample.x, sample.y, sample.z);
-
-                    v = noise.noiseType == NoiseType.Ridge
-                        ? 1f - Mathf.Abs(v * 2f - 1f)
-                        : v * 2f - 1f;
-
-                    layerNoise += v * amplitude;
-                    totalAmplitude += amplitude;
-                    amplitude *= noise.persistence;
-                    frequency *= noise.lacunarity;
+                    Vector3 samplePoint = (normal + layer.offset) * frequency;
+                    float value = PerlinNoise3D.GenerateNoise(samplePoint.x, samplePoint.y, samplePoint.z);
+                    value = layer.noiseType == NoiseType.Ridge ? 1 - Mathf.Abs(value * 2 - 1) : value * 2 - 1;
+                    noiseSum += value * amplitude;
+                    amplitudeSum += amplitude;
+                    amplitude *= layer.persistence;
+                    frequency *= layer.lacunarity;
                 }
 
-                float noiseVal = totalAmplitude > 0 ? layerNoise / totalAmplitude : 0f;
-                noiseVal += noise.minValue;
-
-                if (noise.useFirstLayerAsMask && mask <= 0) continue;
-                if (noise.useFirstLayerAsMask) mask = noiseVal;
-
-                displacement += noiseVal * noise.strength;
+                float finalNoise = (amplitudeSum == 0 ? 0 : noiseSum / amplitudeSum) + layer.minValue;
+                if (layer.useFirstLayerAsMask) firstLayerValue = finalNoise;
+                if (layer.useFirstLayerAsMask && firstLayerValue <= 0) finalNoise = 0;
+                totalDisplacement += finalNoise * layer.strength;
             }
 
-            float height = 1 + displacement + shapeSettings.globalHeightOffset;
-            vertices[i] = normal * radius * height;
-            float finalMagnitude = vertices[i].magnitude;
-            minElevation = Mathf.Min(minElevation, finalMagnitude);
-            maxElevation = Mathf.Max(maxElevation, finalMagnitude);
+            vertices[i] = normal * radius * (1 + totalDisplacement + shapeSettings.globalHeightOffset);
+            float height = vertices[i].magnitude;
+            minElevation = Mathf.Min(minElevation, height);
+            maxElevation = Mathf.Max(maxElevation, height);
         }
+
+        Vector3[] normals = new Vector3[vertices.Length];
+        for (int i = 0; i < triangles.Length; i += 3)
+        {
+            int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+            Vector3 normal = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).normalized;
+            normals[a] += normal;
+            normals[b] += normal;
+            normals[c] += normal;
+        }
+
+        for (int i = 0; i < normals.Length; i++) normals[i].Normalize();
 
         mesh.vertices = vertices;
         mesh.triangles = triangles;
         mesh.uv = uvs;
-
-        mesh.normals = CalculateNormals(vertices, triangles);
+        mesh.normals = normals;
         mesh.RecalculateBounds();
-
-        meshFilter.sharedMesh = mesh;
-        meshCollider.sharedMesh = mesh;
 
         if (meshRenderer != null && colorSettings.planetMaterial != null)
         {
             meshRenderer.sharedMaterial = colorSettings.planetMaterial;
+
+            // ✅ Remove green tint in fallback
+            meshRenderer.sharedMaterial.color = Color.white;
+
             meshRenderer.sharedMaterial.SetFloat("_Radius", radius);
             meshRenderer.sharedMaterial.SetFloat("_MinHeight", minElevation);
             meshRenderer.sharedMaterial.SetFloat("_MaxHeight", maxElevation);
             meshRenderer.sharedMaterial.SetColor("_OceanColor", colorSettings.oceanColor);
 
             UpdateBiomeTexture();
+
             if (biomeTexture != null)
                 meshRenderer.sharedMaterial.SetTexture("_BiomeTexture", biomeTexture);
         }
+
+        meshCollider.sharedMesh = mesh;
 
         GenerateOceanPlane();
         GenerateAtmospherePlane();
     }
 
-    Vector3[] CalculateNormals(Vector3[] vertices, int[] triangles)
-    {
-        Vector3[] normals = new Vector3[vertices.Length];
-
-        for (int i = 0; i < triangles.Length; i += 3)
-        {
-            int i1 = triangles[i], i2 = triangles[i + 1], i3 = triangles[i + 2];
-            Vector3 normal = Vector3.Cross(vertices[i2] - vertices[i1], vertices[i3] - vertices[i1]).normalized;
-            normals[i1] += normal;
-            normals[i2] += normal;
-            normals[i3] += normal;
-        }
-
-        for (int i = 0; i < normals.Length; i++) normals[i].Normalize();
-        return normals;
-    }
-
-    void UpdateBiomeTexture()
-    {
-        if (colorSettings == null || colorSettings.biomes == null || colorSettings.biomes.Length == 0)
-        {
-            if (biomeTexture != null) DestroyImmediate(biomeTexture);
-            return;
-        }
-
-        int res = 256;
-        biomeTexture = new Texture2D(res, 1, TextureFormat.RGBA32, false)
-        {
-            filterMode = FilterMode.Bilinear,
-            wrapMode = TextureWrapMode.Clamp
-        };
-
-        Color[] pixels = new Color[res];
-        System.Array.Sort(colorSettings.biomes, (a, b) => a.startHeight.CompareTo(b.startHeight));
-
-        for (int i = 0; i < res; i++)
-        {
-            float h = (float)i / (res - 1);
-            Color c = colorSettings.oceanColor;
-
-            foreach (var biome in colorSettings.biomes)
-            {
-                float blend = Mathf.Clamp01((h - biome.startHeight) / biome.blendAmount);
-                c = Color.Lerp(c, biome.color, blend);
-            }
-            pixels[i] = c;
-        }
-
-        biomeTexture.SetPixels(pixels);
-        biomeTexture.Apply();
-    }
-
     void GenerateOceanPlane()
     {
+        foreach (Transform child in transform)
+        {
+            if (child.name == "Ocean" && child.gameObject != oceanGameObject)
+                DestroyImmediate(child.gameObject);
+        }
+
         if (oceanGameObject == null)
         {
             oceanGameObject = new GameObject("Ocean");
-            oceanGameObject.transform.SetParent(transform);
+            oceanGameObject.transform.parent = transform;
             oceanGameObject.transform.localPosition = Vector3.zero;
             oceanGameObject.transform.localRotation = Quaternion.identity;
-
+            oceanGameObject.transform.localScale = Vector3.one;
             oceanMeshFilter = oceanGameObject.AddComponent<MeshFilter>();
             oceanMeshRenderer = oceanGameObject.AddComponent<MeshRenderer>();
-            oceanMesh = new Mesh { name = "Ocean Mesh" };
+            oceanMesh = new Mesh { name = "Generated Ocean Mesh" };
             oceanMeshFilter.sharedMesh = oceanMesh;
         }
 
         oceanMesh.Clear();
-        SphereCreator.CreateSphereMesh(resolution, radius * 1.01f, out Vector3[] verts, out int[] tris, out Vector2[] uvs);
-        oceanMesh.vertices = verts;
-        oceanMesh.triangles = tris;
-        oceanMesh.uv = uvs;
+
+        float oceanRadius = Mathf.Lerp(minElevation, maxElevation * 0.999f, seaLevel);
+
+        SphereCreator.CreateSphereMesh(resolution, oceanRadius, out Vector3[] v, out int[] t, out Vector2[] uv);
+
+        oceanMesh.vertices = v;
+        oceanMesh.triangles = t;
+        oceanMesh.uv = uv;
         oceanMesh.RecalculateNormals();
         oceanMesh.RecalculateBounds();
 
         if (colorSettings.oceanMaterial != null)
         {
             oceanMeshRenderer.sharedMaterial = colorSettings.oceanMaterial;
-            oceanMeshRenderer.sharedMaterial.SetFloat("_Radius", radius);
+            oceanMeshRenderer.sharedMaterial.SetFloat("_Radius", oceanRadius);
             oceanMeshRenderer.sharedMaterial.SetColor("_Color", colorSettings.oceanColor);
         }
     }
 
     void GenerateAtmospherePlane()
     {
+        foreach (Transform child in transform)
+        {
+            if (child.name == "Atmosphere" && child.gameObject != atmosphereGameObject)
+                DestroyImmediate(child.gameObject);
+        }
+
         if (atmosphereGameObject == null)
         {
             atmosphereGameObject = new GameObject("Atmosphere");
-            atmosphereGameObject.transform.SetParent(transform);
+            atmosphereGameObject.transform.parent = transform;
             atmosphereGameObject.transform.localPosition = Vector3.zero;
             atmosphereGameObject.transform.localRotation = Quaternion.identity;
-
+            atmosphereGameObject.transform.localScale = Vector3.one;
             atmosphereMeshFilter = atmosphereGameObject.AddComponent<MeshFilter>();
             atmosphereMeshRenderer = atmosphereGameObject.AddComponent<MeshRenderer>();
-            atmosphereMesh = new Mesh { name = "Atmosphere Mesh" };
-            atmosphereMeshFilter.sharedMesh = atmosphereMesh;
             atmosphereController = atmosphereGameObject.AddComponent<AtmosphereController>();
+            atmosphereMesh = new Mesh { name = "Generated Atmosphere Mesh" };
+            atmosphereMeshFilter.sharedMesh = atmosphereMesh;
         }
 
         atmosphereMesh.Clear();
+        float radiusBuffer = 1.02f;
+        float atmosphereRadius = Mathf.Min(maxElevation * radiusBuffer, radius * 1.1f);
 
-        float buffer = 0.02f;
-        float atmosphereRadius = Mathf.Min(maxElevation * (1f + buffer), radius * 1.1f);
+        SphereCreator.CreateSphereMesh(resolution, atmosphereRadius, out Vector3[] v, out int[] t, out Vector2[] uv);
 
-        SphereCreator.CreateSphereMesh(resolution, atmosphereRadius, out Vector3[] verts, out int[] tris, out Vector2[] uvs);
-        atmosphereMesh.vertices = verts;
-        atmosphereMesh.triangles = tris;
-        atmosphereMesh.uv = uvs;
+        atmosphereMesh.vertices = v;
+        atmosphereMesh.triangles = t;
+        atmosphereMesh.uv = uv;
         atmosphereMesh.RecalculateNormals();
         atmosphereMesh.RecalculateBounds();
 
         if (colorSettings.atmosphereMaterial != null)
         {
             atmosphereMeshRenderer.sharedMaterial = colorSettings.atmosphereMaterial;
-
-            // ✅ FIX: Safe and modern way to assign sunLight
             if (sceneSunLight == null)
+                sceneSunLight = GameObject.FindFirstObjectByType<Light>();
+
+            atmosphereController.sunLight = sceneSunLight;
+            atmosphereController.atmosphereMaterial = colorSettings.atmosphereMaterial;
+            atmosphereController.atmosphereRadius = atmosphereRadius;
+            atmosphereController.atmosphereColor = colorSettings.atmosphereColor;
+            atmosphereController.density = colorSettings.atmosphereDensity;
+            atmosphereController.power = colorSettings.atmospherePower;
+            atmosphereController.ambientLightInfluence = colorSettings.atmosphereAmbientLightInfluence;
+            atmosphereController.rimPower = colorSettings.atmosphereRimPower;
+        }
+    }
+
+    void UpdateBiomeTexture()
+    {
+        if (colorSettings.biomes == null || colorSettings.biomes.Length == 0) return;
+
+        int texRes = 256;
+        biomeTexture = new Texture2D(texRes, 1, TextureFormat.RGBA32, false)
+        {
+            filterMode = FilterMode.Bilinear,
+            wrapMode = TextureWrapMode.Clamp
+        };
+
+        Color[] pixels = new Color[texRes];
+        System.Array.Sort(colorSettings.biomes, (a, b) => a.startHeight.CompareTo(b.startHeight));
+
+        for (int i = 0; i < texRes; i++)
+        {
+            float h = i / (float)(texRes - 1);
+            Color col = colorSettings.biomes[0].color;
+
+            foreach (var biome in colorSettings.biomes)
             {
-                GameObject sunGO = GameObject.FindWithTag("Sun");
-                if (sunGO != null)
-                    sceneSunLight = sunGO.GetComponent<Light>();
-                else
-                    sceneSunLight = Object.FindFirstObjectByType<Light>();
+                float blend = Mathf.Clamp01((h - biome.startHeight) / biome.blendAmount);
+                col = Color.Lerp(col, biome.color, blend);
             }
 
-            if (atmosphereController != null)
-            {
-                atmosphereController.atmosphereMaterial = colorSettings.atmosphereMaterial;
-                atmosphereController.sunLight = sceneSunLight;
-                atmosphereController.atmosphereRadius = atmosphereRadius;
-                atmosphereController.atmosphereColor = colorSettings.atmosphereColor;
-                atmosphereController.density = colorSettings.atmosphereDensity;
-                atmosphereController.power = colorSettings.atmospherePower;
-                atmosphereController.ambientLightInfluence = colorSettings.atmosphereAmbientLightInfluence;
-                atmosphereController.rimPower = colorSettings.atmosphereRimPower;
-            }
+            pixels[i] = col;
         }
+
+        biomeTexture.SetPixels(pixels);
+        biomeTexture.Apply();
     }
 
     void OnDestroy()
