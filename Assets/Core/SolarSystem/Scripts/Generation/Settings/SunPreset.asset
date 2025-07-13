@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8e5fb52d59b8a3d40bd08776cd36381a, type: 3}
+  m_Name: SunPreset
+  m_EditorClassIdentifier: 
+  resolution: 256
+  radius: 50
+  orbitalRadius: 0
+  shapeSettings: {fileID: 11400000, guid: bdcd621bca952fd4ea38bf0500cdf6cc, type: 2}
+  colorSettings: {fileID: 11400000, guid: 70ae855ea3401794eb700a2fa44817c5, type: 2}
+  planetPrefab: {fileID: 0}

@@ -11,7 +11,7 @@ public class PlanetGenerator : MonoBehaviour
 
     [Range(2, 256)] // Clamp resolution for reasonable performance in Editor
     public int resolution = 64; // Controls the detail of the planet mesh. Higher = more detailed.
-    public float radius = 1f;   // The base radius of the planet.
+    public float radius = 1f;    // The base radius of the planet.
 
     // NEW: Public field for the scene's main directional light (now optional for manual assignment)
     [Tooltip("Assign your scene's main Directional Light (Sun) here. If left unassigned, the script will try to find one named 'Directional Light'.")]
@@ -344,7 +344,7 @@ public class PlanetGenerator : MonoBehaviour
 
         int textureResolution = 256;
 
-        // Corrected: Use biomeTexture.width for comparison
+        // FIX: Corrected 'biomeResolution' to 'biomeTexture.width'
         if (biomeTexture == null || biomeTexture.width != textureResolution)
         {
             if (biomeTexture != null) DestroyImmediate(biomeTexture);
@@ -395,8 +395,7 @@ public class PlanetGenerator : MonoBehaviour
                 oceanMeshFilter = oceanGameObject.GetComponent<MeshFilter>();
                 oceanMeshRenderer = oceanGameObject.GetComponent<MeshRenderer>();
                 oceanMesh = oceanMeshFilter.sharedMesh;
-                // Ensure AtmosphereController is also present if reusing
-                atmosphereController = oceanGameObject.GetComponent<AtmosphereController>(); // This line is incorrect, should be on Atmosphere object
+                // Removed: atmosphereController = oceanGameObject.GetComponent<AtmosphereController>(); // This line is incorrect, should be on Atmosphere object
             }
             else
             {
@@ -421,7 +420,9 @@ public class PlanetGenerator : MonoBehaviour
         Vector3[] oceanVertices;
         int[] oceanTriangles;
         Vector2[] oceanUVs;
-        SphereCreator.CreateSphereMesh(resolution, radius, out oceanVertices, out oceanTriangles, out oceanUVs);
+        // FIX: Added a multiplier to make the ocean slightly larger than the planet's base radius
+        float oceanRadius = radius * 1.005f; // Example: 0.5% larger. Adjust as needed.
+        SphereCreator.CreateSphereMesh(resolution, oceanRadius, out oceanVertices, out oceanTriangles, out oceanUVs);
 
         // Assign ocean mesh data
         oceanMesh.vertices = oceanVertices;
@@ -532,10 +533,17 @@ public class PlanetGenerator : MonoBehaviour
                     }
                 }
                 atmosphereController.sunLight = sceneSunLight; // Assign the found/assigned light
-                // If your S_Atmosphere shader graph uses a _Radius property, you'd pass it here.
-                // For now, we assume AtmosphereController or the shader itself handles its scale.
-                // If you want the shader to know the planet's base radius, you could pass it:
-                // atmosphereMeshRenderer.sharedMaterial.SetFloat("_PlanetRadius", radius);
+
+                // FIX: Pass the calculated atmosphereRadius to the AtmosphereController
+                atmosphereController.atmosphereRadius = atmosphereRadius;
+
+                // FIX: Pass the other shader properties from ColorSettings to AtmosphereController
+                atmosphereController.atmosphereColor = colorSettings.atmosphereColor;
+                atmosphereController.density = colorSettings.atmosphereDensity;
+                atmosphereController.power = colorSettings.atmospherePower;
+                atmosphereController.ambientLightInfluence = colorSettings.atmosphereAmbientLightInfluence;
+                atmosphereController.rimPower = colorSettings.atmosphereRimPower;
+
             }
         }
         else
