@@ -35,7 +35,7 @@ MonoBehaviour:
     noiseType: 0
     useFirstLayerAsMask: 0
   - enabled: 1
-    strength: 0.05
+    strength: 0.5
     roughness: 4
     octaves: 5
     persistence: 0.5
