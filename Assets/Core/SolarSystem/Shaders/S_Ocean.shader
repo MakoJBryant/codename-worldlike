@@ -1,4 +1,4 @@
-Shader "Solar System/Ocean"
+Shader "Solar System/S_Ocean"
 {
     Properties
     {
