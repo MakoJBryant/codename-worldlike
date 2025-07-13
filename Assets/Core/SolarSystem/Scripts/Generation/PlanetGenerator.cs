@@ -16,6 +16,11 @@ public class PlanetGenerator : MonoBehaviour
     public ShapeSettings shapeSettings;
     public ColorSettings colorSettings;
 
+    // Range updated to 0.5f to 1.5f as requested.
+    // Be cautious with values below 1.0 as the atmosphere mesh will be smaller than the planet's highest points.
+    [Range(0.5f, 1.5f), Tooltip("Factor by which the atmosphere radius expands/contracts relative to the planet's max elevation.")]
+    public float atmosphereExpansionFactor = 1.02f;
+
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
     private MeshCollider meshCollider;
@@ -217,8 +222,7 @@ public class PlanetGenerator : MonoBehaviour
         }
 
         atmosphereMesh.Clear();
-        float radiusBuffer = 1.02f;
-        float atmosphereRadius = Mathf.Min(maxElevation * radiusBuffer, radius * 1.1f);
+        float atmosphereRadius = maxElevation * atmosphereExpansionFactor;
 
         SphereCreator.CreateSphereMesh(resolution, atmosphereRadius, out Vector3[] v, out int[] t, out Vector2[] uv);
 
