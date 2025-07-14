@@ -1,9 +1,8 @@
 using UnityEngine;
 
-namespace MakoJBryant.SolarSystem // Use the same namespace as SolarSystemManager
+namespace MakoJBryant.SolarSystem
 {
     // Ensures a Rigidbody component is present on the GameObject this script is attached to.
-    // Rigidbody is essential for physics simulation (mass, velocity, forces).
     [RequireComponent(typeof(Rigidbody))]
     public class CelestialBody : MonoBehaviour
     {
@@ -11,21 +10,17 @@ namespace MakoJBryant.SolarSystem // Use the same namespace as SolarSystemManage
         public string bodyName = "New Celestial Body";
 
         [Tooltip("The mass of this celestial body. Higher mass means stronger gravitational pull and more inertia.")]
-        public float mass = 1.0f; // Default mass
+        public float mass = 1000f; // Default mass, adjust in Inspector
 
-        // Private reference to the Rigidbody component.
-        // [SerializeField] allows it to be visible in the Inspector for debugging, but not directly assigned.
+        [Tooltip("The initial velocity of this body in meters per second. Set this in the Inspector for orbits.")]
+        public Vector3 initialVelocity; // Set this in the Inspector for orbits
+
         [SerializeField] private Rigidbody rb;
 
-        // Public property to easily access the Rigidbody component from other scripts.
         public Rigidbody Rigidbody => rb;
 
-        // Awake is called when the script instance is being loaded.
-        // This is where we get component references and perform initial setup.
         void Awake()
         {
-            // Get the Rigidbody component. If it's not found (which shouldn't happen due to RequireComponent),
-            // log an error.
             rb = GetComponent<Rigidbody>();
             if (rb == null)
             {
@@ -33,13 +28,14 @@ namespace MakoJBryant.SolarSystem // Use the same namespace as SolarSystemManage
                                "Please ensure a Rigidbody component is attached.", this);
             }
 
-            // For orbital mechanics, we will manually apply gravitational forces in FixedUpdate
-            // via the SolarSystemManager. Therefore, Unity's default physics gravity should be disabled.
+            // Disable Unity's default gravity, as we'll be handling gravity manually via SolarSystemManager.
             rb.useGravity = false;
+            rb.isKinematic = false; // Ensure it's not kinematic so forces can move it.
+            rb.mass = mass; // Set the Rigidbody's mass.
+            rb.linearDamping = 0f; // No air resistance in space.
+            rb.angularDamping = 0f; // No angular resistance.
 
-            // Add this celestial body to the SolarSystemManager's list of bodies.
-            // This allows the manager to track and apply forces to all bodies in the simulation.
-            // We check for null in case SolarSystemManager hasn't been initialized yet (though Awake order helps).
+            // Register this celestial body with the SolarSystemManager.
             if (SolarSystemManager.Instance != null)
             {
                 SolarSystemManager.Instance.RegisterCelestialBody(this);
@@ -51,19 +47,34 @@ namespace MakoJBryant.SolarSystem // Use the same namespace as SolarSystemManage
             }
         }
 
-        // OnDestroy is called when the GameObject is destroyed or the scene is unloaded.
-        // It's important to unregister the body to prevent null reference errors
-        // in the SolarSystemManager's list if this body is removed during runtime.
+        void Start()
+        {
+            // Initialize the Rigidbody's linear velocity with the initial velocity.
+            rb.linearVelocity = initialVelocity;
+        }
+
+        // The ApplyVerletIntegration method is no longer needed here because
+        // SolarSystemManager now directly applies forces using Rigidbody.AddForce,
+        // letting Unity's physics engine handle the integration.
+
         void OnDestroy()
         {
+            // Unregister this celestial body from the SolarSystemManager.
             if (SolarSystemManager.Instance != null)
             {
                 SolarSystemManager.Instance.UnregisterCelestialBody(this);
             }
         }
 
-        // You can add other methods here specific to a celestial body,
-        // such as methods for applying initial velocity, handling collisions,
-        // or updating visual properties based on simulation state.
+        void OnDrawGizmos()
+        {
+            if (Application.isPlaying && rb != null)
+            {
+                Gizmos.color = Color.cyan;
+                // Draw a line representing the current linear velocity.
+                Gizmos.DrawLine(transform.position, transform.position + rb.linearVelocity);
+                Gizmos.DrawSphere(transform.position + rb.linearVelocity, 0.1f);
+            }
+        }
     }
 }

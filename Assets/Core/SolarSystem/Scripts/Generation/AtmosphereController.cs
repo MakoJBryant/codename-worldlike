@@ -37,7 +37,7 @@ public class AtmosphereController : MonoBehaviour
             }
             else
             {
-                Debug.LogWarning("AtmosphereController: No MeshRenderer found to get material from.");
+                Debug.LogWarning("AtmosphereController: No MeshRenderer found to get material from. Ensure one is present.", this);
             }
         }
         // Call UpdateShaderProperties once at start to ensure initial values are set
@@ -46,7 +46,7 @@ public class AtmosphereController : MonoBehaviour
 
     void Update()
     {
-        // Update shader properties every frame (e.g., sun direction changes)
+        // Update shader properties every frame (e.g., sun direction changes, or planet moves)
         UpdateShaderProperties();
     }
 
@@ -55,21 +55,30 @@ public class AtmosphereController : MonoBehaviour
     {
         if (atmosphereMaterial == null)
         {
-            Debug.LogWarning("AtmosphereController: Atmosphere Material is null. Cannot set shader properties.");
+            Debug.LogWarning("AtmosphereController: Atmosphere Material is null. Cannot set shader properties.", this);
             return;
         }
 
         // Pass the sun's direction to the atmosphere shader.
         if (sunLight != null)
         {
+            // _SunDirection should point from the object towards the sun.
+            // Sun's forward is its Z-axis, which is the direction it's pointing.
+            // To get the direction *from* the object *to* the sun, we might need
+            // to consider the sun's position relative to the atmosphere,
+            // or if it's a directional light, its negative forward vector.
             atmosphereMaterial.SetVector("_SunDirection", -sunLight.transform.forward);
         }
         else
         {
-            // If sunLight is null, use a default direction or log a warning
             atmosphereMaterial.SetVector("_SunDirection", Vector3.forward); // Default to forward if no sun
-            // Debug.LogWarning("AtmosphereController: Sun Light is not assigned. Using default sun direction.");
+            // Debug.LogWarning("AtmosphereController: Sun Light is not assigned. Using default sun direction.", this);
         }
+
+        // Pass the atmosphere's world center to the shader.
+        // Since this GameObject is a child of the Planet at localPosition (0,0,0),
+        // its transform.position will automatically be the planet's world position.
+        atmosphereMaterial.SetVector("_PlanetCenter", transform.position);
 
         // Pass the atmosphere radius to the shader.
         atmosphereMaterial.SetFloat("_AtmosphereRadius", atmosphereRadius);

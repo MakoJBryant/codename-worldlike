@@ -42,6 +42,11 @@ namespace MakoJBryant.SolarSystem
             // Otherwise, set this instance as the singleton.
             Instance = this;
             Debug.Log("Solar System Manager Initialized!");
+
+            // Set Unity's fixed timestep based on our desired time scale.
+            // This ensures consistent physics updates regardless of frame rate.
+            // Default Unity fixedDeltaTime is 0.02 (50 updates/sec)
+            Time.fixedDeltaTime = 0.02f / timeScale;
         }
 
         // FixedUpdate is called at a fixed framerate, independent of frame rate.
@@ -49,19 +54,26 @@ namespace MakoJBryant.SolarSystem
         void FixedUpdate()
         {
             // Iterate through each celestial body and calculate gravitational forces.
-            for (int i = 0; i < celestialBodies.Count; i++)
+            // Create a temporary array to avoid issues if bodies are added/removed during iteration.
+            CelestialBody[] currentBodies = celestialBodies.ToArray();
+
+            for (int i = 0; i < currentBodies.Length; i++)
             {
-                CelestialBody bodyA = celestialBodies[i];
+                CelestialBody bodyA = currentBodies[i];
 
                 // Ensure bodyA and its Rigidbody are valid before proceeding.
                 if (bodyA == null || bodyA.Rigidbody == null) continue;
 
-                for (int j = 0; j < celestialBodies.Count; j++)
+                // We no longer need to accumulate totalAcceleration here and call ApplyVerletIntegration
+                // because we are directly applying forces to the Rigidbody.
+                // Unity's physics engine will handle the integration of these forces.
+
+                for (int j = 0; j < currentBodies.Length; j++)
                 {
                     // Don't calculate gravity of a body on itself.
                     if (i == j) continue;
 
-                    CelestialBody bodyB = celestialBodies[j];
+                    CelestialBody bodyB = currentBodies[j];
 
                     // Ensure bodyB and its Rigidbody are valid.
                     if (bodyB == null || bodyB.Rigidbody == null) continue;
@@ -70,8 +82,8 @@ namespace MakoJBryant.SolarSystem
                     Vector3 force = CalculateGravitationalForce(bodyA, bodyB);
 
                     // Apply the force to bodyA's Rigidbody.
-                    // We multiply by Time.fixedDeltaTime to make the force application frame-rate independent.
-                    // We also multiply by timeScale to control the simulation speed.
+                    // We multiply by timeScale to control the simulation speed.
+                    // ForceMode.Force applies a continuous force to the rigidbody, using its mass.
                     bodyA.Rigidbody.AddForce(force * timeScale, ForceMode.Force);
                 }
             }
@@ -142,6 +154,25 @@ namespace MakoJBryant.SolarSystem
             if (Instance == this)
             {
                 Instance = null;
+            }
+        }
+
+        // Optional: Draw lines between gravitating bodies in editor for debugging
+        void OnDrawGizmos()
+        {
+            if (celestialBodies == null || celestialBodies.Count < 2) return;
+
+            Gizmos.color = Color.yellow;
+            // Draw lines between all pairs of bodies
+            for (int i = 0; i < celestialBodies.Count; i++)
+            {
+                if (celestialBodies[i] == null || celestialBodies[i].Rigidbody == null) continue; // Skip if body was destroyed or Rigidbody is null
+
+                for (int j = i + 1; j < celestialBodies.Count; j++) // Start from i+1 to avoid duplicates and self-drawing
+                {
+                    if (celestialBodies[j] == null || celestialBodies[j].Rigidbody == null) continue; // Skip if body was destroyed or Rigidbody is null
+                    Gizmos.DrawLine(celestialBodies[i].Rigidbody.position, celestialBodies[j].Rigidbody.position);
+                }
             }
         }
     }
