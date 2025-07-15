@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: EarthPreset
   m_EditorClassIdentifier: 
   resolution: 64
-  radius: 10
+  radius: 1
   orbitalRadius: 150
   shapeSettings: {fileID: 11400000, guid: bdcd621bca952fd4ea38bf0500cdf6cc, type: 2}
   colorSettings: {fileID: 11400000, guid: 70ae855ea3401794eb700a2fa44817c5, type: 2}

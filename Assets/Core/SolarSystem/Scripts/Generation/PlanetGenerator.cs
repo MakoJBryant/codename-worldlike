@@ -1,29 +1,23 @@
 ﻿using UnityEngine;
 using MakoJBryant.SolarSystem.Generation;
 
-// Ensure these core components are always present on the GameObject
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider))]
-// Prevent multiple instances of this script on the same GameObject
 [DisallowMultipleComponent]
 [ExecuteInEditMode]
 public class PlanetGenerator : MonoBehaviour
 {
     [Range(2, 256)] public int resolution = 64;
     public float radius = 1f;
-
-    [Range(0f, 1f), Tooltip("Controls ocean height between min and max elevation.")]
-    public float seaLevel = 0.5f;
-
+    [Range(0f, 1f)] public float seaLevel = 0.5f;
     public Light sceneSunLight;
 
     [Header("Settings Assets")]
-    [Tooltip("Assign your ShapeSettings ScriptableObject here.")]
     public ShapeSettings shapeSettings;
-    [Tooltip("Assign your ColorSettings ScriptableObject here.")]
     public ColorSettings colorSettings;
 
-    [Range(0.5f, 1.5f), Tooltip("Factor by which the atmosphere radius expands/contracts relative to the planet's max elevation.")]
-    public float atmosphereExpansionFactor = 1.02f;
+    [Range(0.5f, 1.5f)] public float atmosphereExpansionFactor = 1.02f;
+
+    public Transform sunTransform;
 
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
@@ -42,126 +36,111 @@ public class PlanetGenerator : MonoBehaviour
     private AtmosphereController atmosphereController;
 
     private float minElevation;
-    private float maxElevation; // Corrected variable name from floatmaxElevation
+    private float maxElevation;
     private Texture2D biomeTexture;
 
     void Awake()
     {
-        // Get existing components. RequireComponent ensures they are there.
         meshFilter = GetComponent<MeshFilter>();
         meshRenderer = GetComponent<MeshRenderer>();
         meshCollider = GetComponent<MeshCollider>();
 
-        // Added a specific check for MeshCollider in Awake
-        if (meshCollider == null)
-        {
-            Debug.LogError("PlanetGenerator: MeshCollider component not found on this GameObject. Please ensure it has a MeshCollider, not a SphereCollider or other collider type.", this);
-        }
-
-        if (mesh == null)
-            mesh = new Mesh { name = "Generated Planet Mesh" };
-
+        mesh = new Mesh { name = "Generated Planet Mesh" };
         meshFilter.sharedMesh = mesh;
+
         GeneratePlanet();
     }
 
     void OnValidate()
     {
-        // OnValidate is called when a script is loaded or a value is changed in the Inspector.
-        // We'll use this to regenerate the planet when settings change.
-        if (mesh == null)
-            mesh = new Mesh { name = "Generated Planet Mesh" };
-
-        // Only attempt to update if color settings are assigned
-        if (colorSettings != null)
-            UpdateBiomeTexture();
-
-        // ONLY generate the planet if BOTH shape and color settings are assigned.
-        // This prevents NullReferenceExceptions if settings are temporarily unassigned in editor.
         if (shapeSettings != null && colorSettings != null)
-        {
             GeneratePlanet();
-        }
-        else
-        {
-            Debug.LogWarning("PlanetGenerator: ShapeSettings or ColorSettings are missing. Planet generation skipped in OnValidate.", this);
-        }
     }
 
     [ContextMenu("Generate Planet Now")]
     public void GeneratePlanet()
     {
-        Debug.Log($"Generating Planet '{gameObject.name}' at world position: {transform.position}", this);
-
-        // Explicitly check for null settings before proceeding with any generation logic
-        if (shapeSettings == null)
+        if (shapeSettings == null || colorSettings == null)
         {
-            Debug.LogError("Missing ShapeSettings. Cannot generate planet.", this);
-            return;
-        }
-        if (colorSettings == null)
-        {
-            Debug.LogError("Missing ColorSettings. Cannot generate planet.", this);
+            Debug.LogWarning("ShapeSettings or ColorSettings missing—aborting planet generation.");
             return;
         }
 
         mesh.Clear();
-        // IMPORTANT: SphereCreator.CreateSphereMesh must generate vertices in LOCAL SPACE (around 0,0,0)
-        // It must NOT add transform.position or any world-space offsets.
         SphereCreator.CreateSphereMesh(resolution, radius, out Vector3[] vertices, out int[] triangles, out Vector2[] uvs);
 
-        minElevation = float.MaxValue;
-        maxElevation = float.MinValue; // Corrected variable name
+        // --- DIAGNOSTIC: Calculate mesh centroid before displacement ---
+        Vector3 centroidBefore = Vector3.zero;
+        for (int i = 0; i < vertices.Length; i++)
+            centroidBefore += vertices[i];
+        centroidBefore /= vertices.Length;
+        Debug.Log($"[PlanetGenerator] Mesh centroid before displacement: {centroidBefore}");
 
+        minElevation = float.MaxValue;
+        maxElevation = float.MinValue;
+
+        // Displace vertices based on noise, in local space
         for (int i = 0; i < vertices.Length; i++)
         {
             Vector3 normal = vertices[i].normalized;
-            float totalDisplacement = 0;
-            float firstLayerValue = 0;
+            float displacement = shapeSettings.globalHeightOffset;
+            float firstValue = 0f;
 
-            foreach (NoiseLayer layer in shapeSettings.noiseLayers)
+            foreach (var layer in shapeSettings.noiseLayers)
             {
                 if (!layer.enabled) continue;
 
-                float noiseSum = 0;
-                float frequency = layer.roughness;
-                float amplitude = 1;
-                float amplitudeSum = 0;
-
-                for (int j = 0; j < layer.octaves; j++)
+                float noise = 0f, freq = layer.roughness, amp = 1f, ampSum = 0f;
+                for (int o = 0; o < layer.octaves; o++)
                 {
-                    Vector3 samplePoint = (normal + layer.offset) * frequency;
-                    float value = PerlinNoise3D.GenerateNoise(samplePoint.x, samplePoint.y, samplePoint.z);
-                    value = layer.noiseType == NoiseType.Ridge ? 1 - Mathf.Abs(value * 2 - 1) : value * 2 - 1;
-                    noiseSum += value * amplitude;
-                    amplitudeSum += amplitude;
-                    amplitude *= layer.persistence;
-                    frequency *= layer.lacunarity;
+                    Vector3 p = (normal + layer.offset) * freq;
+                    float v = PerlinNoise3D.GenerateNoise(p.x, p.y, p.z);
+                    v = layer.noiseType == NoiseType.Ridge ? 1 - Mathf.Abs(v * 2 - 1) : v * 2 - 1;
+                    noise += v * amp;
+                    ampSum += amp;
+                    amp *= layer.persistence;
+                    freq *= layer.lacunarity;
                 }
 
-                float finalNoise = (amplitudeSum == 0 ? 0 : noiseSum / amplitudeSum) + layer.minValue;
-                if (layer.useFirstLayerAsMask) firstLayerValue = finalNoise;
-                if (layer.useFirstLayerAsMask && firstLayerValue <= 0) finalNoise = 0;
-                totalDisplacement += finalNoise * layer.strength;
+                float final = (ampSum == 0f ? 0f : noise / ampSum) + layer.minValue;
+                if (layer.useFirstLayerAsMask) firstValue = final;
+                if (layer.useFirstLayerAsMask && firstValue <= 0f) final = 0f;
+
+                displacement += final * layer.strength;
             }
 
-            // Vertices are calculated here in local space relative to the mesh's origin (0,0,0)
-            vertices[i] = normal * radius * (1 + totalDisplacement + shapeSettings.globalHeightOffset);
+            // Displace vertex along its normal (local space)
+            float originalLength = vertices[i].magnitude;
+            vertices[i] = normal * (originalLength + displacement);
+
             float height = vertices[i].magnitude;
             minElevation = Mathf.Min(minElevation, height);
-            maxElevation = Mathf.Max(maxElevation, height); // Corrected variable name
+            maxElevation = Mathf.Max(maxElevation, height);
+
+            // Debug displaced vertex positions of first few vertices (optional)
+            if (i < 10)
+            {
+                Debug.Log($"[Vertex {i}] Normal: {normal}, Displacement: {displacement}, New Pos: {vertices[i]}");
+            }
         }
 
-        Vector3[] normals = new Vector3[vertices.Length];
+        // --- DIAGNOSTIC: Calculate mesh centroid after displacement ---
+        Vector3 centroidAfter = Vector3.zero;
+        for (int i = 0; i < vertices.Length; i++)
+            centroidAfter += vertices[i];
+        centroidAfter /= vertices.Length;
+        Debug.Log($"[PlanetGenerator] Mesh centroid after displacement: {centroidAfter}");
+
+        // Calculate normals from triangles
+        var normals = new Vector3[vertices.Length];
         for (int i = 0; i < triangles.Length; i += 3)
         {
             int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
-            Vector3 normal = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).normalized;
-            normals[a] += normal;
-            normals[b] += normal;
-            normals[c] += normal;
+            Vector3 faceNormal = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).normalized;
+            normals[a] += faceNormal;
+            normals[b] += faceNormal;
+            normals[c] += faceNormal;
         }
-
         for (int i = 0; i < normals.Length; i++) normals[i].Normalize();
 
         mesh.vertices = vertices;
@@ -170,54 +149,54 @@ public class PlanetGenerator : MonoBehaviour
         mesh.normals = normals;
         mesh.RecalculateBounds();
 
-        // Ensure meshRenderer and planetMaterial are not null before assigning
-        if (meshRenderer != null && colorSettings.planetMaterial != null)
-        {
-            meshRenderer.sharedMaterial = colorSettings.planetMaterial;
+        // Update material properties
+        meshRenderer.sharedMaterial = colorSettings.planetMaterial;
+        meshRenderer.sharedMaterial.SetFloat("_Radius", radius);
+        meshRenderer.sharedMaterial.SetFloat("_MinHeight", minElevation);
+        meshRenderer.sharedMaterial.SetFloat("_MaxHeight", maxElevation);
+        meshRenderer.sharedMaterial.SetVector("_PlanetCenter", transform.position);
 
-            // Remove green tint in fallback
-            meshRenderer.sharedMaterial.color = Color.white;
+        biomeTexture = UpdateBiomeTexture();
+        if (biomeTexture != null)
+            meshRenderer.sharedMaterial.SetTexture("_BiomeTexture", biomeTexture);
 
-            // These properties are typically relative to the object's local space
-            meshRenderer.sharedMaterial.SetFloat("_Radius", radius);
-            meshRenderer.sharedMaterial.SetFloat("_MinHeight", minElevation);
-            meshRenderer.sharedMaterial.SetFloat("_MaxHeight", maxElevation); // Corrected variable name
-            meshRenderer.sharedMaterial.SetColor("_OceanColor", colorSettings.oceanColor);
+        meshCollider.sharedMesh = mesh;
 
-            UpdateBiomeTexture();
-
-            if (biomeTexture != null)
-                meshRenderer.sharedMaterial.SetTexture("_BiomeTexture", biomeTexture);
-        }
-        else if (meshRenderer == null)
-        {
-            Debug.LogError("PlanetGenerator: MeshRenderer is null, cannot apply planet material. Ensure it's on the GameObject.", this);
-        }
-        else if (colorSettings.planetMaterial == null)
-        {
-            Debug.LogError("PlanetGenerator: colorSettings.planetMaterial is null, cannot apply to planet mesh. Assign it in ColorSettings asset.", this);
-        }
-
-
-        if (meshCollider != null) // This check is now crucial
-        {
-            meshCollider.sharedMesh = mesh;
-        }
-        else
-        {
-            Debug.LogError("PlanetGenerator: MeshCollider is null, cannot assign mesh. Ensure it's on the GameObject and is a MeshCollider, not a SphereCollider.", this);
-            return; // Added return to prevent further null reference errors if collider is missing
-        }
-
-
+        AlignChildObjects();
         GenerateOceanPlane();
         GenerateAtmospherePlane();
     }
 
+    void LateUpdate()
+    {
+        AlignChildObjects();
+
+        if (sunTransform != null)
+        {
+            float orbitSpeed = 10f;
+            transform.RotateAround(sunTransform.position, Vector3.up, orbitSpeed * Time.deltaTime);
+
+            meshRenderer.sharedMaterial.SetVector("_PlanetCenter", transform.position);
+
+            if (oceanMeshRenderer != null)
+                oceanMeshRenderer.sharedMaterial.SetVector("_PlanetCenter", transform.position);
+
+            if (atmosphereMeshRenderer != null)
+                atmosphereMeshRenderer.sharedMaterial.SetVector("_PlanetCenter", transform.position);
+        }
+    }
+
+    private void AlignChildObjects()
+    {
+        if (oceanGameObject != null)
+            oceanGameObject.transform.SetParent(transform, false);
+
+        if (atmosphereGameObject != null)
+            atmosphereGameObject.transform.SetParent(transform, false);
+    }
+
     void GenerateOceanPlane()
     {
-        // Destroy any existing ocean GameObject that is a child of this transform and named "Ocean"
-        // but is not the current oceanGameObject reference. This handles regeneration.
         for (int i = transform.childCount - 1; i >= 0; i--)
         {
             Transform child = transform.GetChild(i);
@@ -230,29 +209,15 @@ public class PlanetGenerator : MonoBehaviour
         if (oceanGameObject == null)
         {
             oceanGameObject = new GameObject("Ocean");
-            oceanGameObject.transform.parent = transform; // Set parent: Makes "Ocean" a child of the planet
-            // Ensure local position is zero relative to the parent
-            oceanGameObject.transform.localPosition = Vector3.zero;
-            oceanGameObject.transform.localRotation = Quaternion.identity;
-            oceanGameObject.transform.localScale = Vector3.one;
+            oceanGameObject.transform.SetParent(transform, false);
             oceanMeshFilter = oceanGameObject.AddComponent<MeshFilter>();
             oceanMeshRenderer = oceanGameObject.AddComponent<MeshRenderer>();
             oceanMesh = new Mesh { name = "Generated Ocean Mesh" };
             oceanMeshFilter.sharedMesh = oceanMesh;
         }
-        else
-        {
-            // If oceanGameObject already exists, just ensure its parent and local position are correct
-            oceanGameObject.transform.parent = transform;
-            oceanGameObject.transform.localPosition = Vector3.zero;
-        }
 
         oceanMesh.Clear();
-
-        float oceanRadius = Mathf.Lerp(minElevation, maxElevation * 0.999f, seaLevel); // Corrected variable name
-
-        // IMPORTANT: SphereCreator.CreateSphereMesh must generate vertices in LOCAL SPACE (around 0,0,0)
-        // for the ocean mesh as well.
+        float oceanRadius = Mathf.Lerp(minElevation, maxElevation * 0.999f, seaLevel);
         SphereCreator.CreateSphereMesh(resolution, oceanRadius, out Vector3[] v, out int[] t, out Vector2[] uv);
 
         oceanMesh.vertices = v;
@@ -261,32 +226,19 @@ public class PlanetGenerator : MonoBehaviour
         oceanMesh.RecalculateNormals();
         oceanMesh.RecalculateBounds();
 
-        // Ensure oceanMeshRenderer and oceanMaterial are not null before assigning
         if (oceanMeshRenderer != null && colorSettings.oceanMaterial != null)
         {
             oceanMeshRenderer.sharedMaterial = colorSettings.oceanMaterial;
-            // _Radius is probably fine as it's a size parameter, not a position.
             oceanMeshRenderer.sharedMaterial.SetFloat("_Radius", oceanRadius);
             oceanMeshRenderer.sharedMaterial.SetColor("_Color", colorSettings.oceanColor);
+            oceanMeshRenderer.sharedMaterial.SetVector("_PlanetCenter", transform.position);
+        }
 
-            // If your ocean shader relies on the planet's world position,
-            // you might need to pass transform.position here too, similar to atmosphere.
-            // oceanMeshRenderer.sharedMaterial.SetVector("_PlanetCenter", transform.position);
-        }
-        else if (oceanMeshRenderer == null)
-        {
-            Debug.LogError("PlanetGenerator: OceanMeshRenderer is null, cannot apply ocean material. Ensure it's on the GameObject.", this);
-        }
-        else if (colorSettings.oceanMaterial == null)
-        {
-            Debug.LogError("PlanetGenerator: colorSettings.oceanMaterial is null, cannot apply to ocean mesh. Assign it in ColorSettings asset.", this);
-        }
+        Debug.Log($"Ocean Transform - Position: {oceanGameObject.transform.position}, Rotation: {oceanGameObject.transform.rotation.eulerAngles}, Scale: {oceanGameObject.transform.localScale}");
     }
 
     void GenerateAtmospherePlane()
     {
-        // Destroy any existing atmosphere GameObject that is a child of this transform and named "Atmosphere"
-        // but is not the current atmosphereGameObject reference. This handles regeneration.
         for (int i = transform.childCount - 1; i >= 0; i--)
         {
             Transform child = transform.GetChild(i);
@@ -299,39 +251,16 @@ public class PlanetGenerator : MonoBehaviour
         if (atmosphereGameObject == null)
         {
             atmosphereGameObject = new GameObject("Atmosphere");
-            atmosphereGameObject.transform.parent = transform; // Set parent
-            // Ensure local position is zero relative to the parent
-            atmosphereGameObject.transform.localPosition = Vector3.zero;
-            atmosphereGameObject.transform.localRotation = Quaternion.identity;
-            atmosphereGameObject.transform.localScale = Vector3.one;
+            atmosphereGameObject.transform.SetParent(transform, false);
             atmosphereMeshFilter = atmosphereGameObject.AddComponent<MeshFilter>();
             atmosphereMeshRenderer = atmosphereGameObject.AddComponent<MeshRenderer>();
-            atmosphereController = atmosphereGameObject.AddComponent<AtmosphereController>(); // This line is critical
+            atmosphereController = atmosphereGameObject.AddComponent<AtmosphereController>();
             atmosphereMesh = new Mesh { name = "Generated Atmosphere Mesh" };
             atmosphereMeshFilter.sharedMesh = atmosphereMesh;
         }
-        else
-        {
-            // If atmosphereGameObject already exists, just ensure its parent and local position are correct
-            atmosphereGameObject.transform.parent = transform;
-            atmosphereGameObject.transform.localPosition = Vector3.zero;
-            // Also ensure atmosphereController is still valid if the GameObject was just reused
-            atmosphereController = atmosphereGameObject.GetComponent<AtmosphereController>();
-        }
-
-        // IMPORTANT: Check if atmosphereController is null AFTER trying to add/get it.
-        if (atmosphereController == null)
-        {
-            Debug.LogError("PlanetGenerator: AtmosphereController component is missing or failed to add to Atmosphere GameObject. Cannot configure atmosphere. Check if AtmosphereController.cs has compile errors.", this);
-            return; // Exit if controller is not available
-        }
-
 
         atmosphereMesh.Clear();
-        float atmosphereRadius = maxElevation * atmosphereExpansionFactor; // Corrected variable name
-
-        // IMPORTANT: SphereCreator.CreateSphereMesh must generate vertices in LOCAL SPACE (around 0,0,0)
-        // for the atmosphere mesh as well.
+        float atmosphereRadius = maxElevation * atmosphereExpansionFactor;
         SphereCreator.CreateSphereMesh(resolution, atmosphereRadius, out Vector3[] v, out int[] t, out Vector2[] uv);
 
         atmosphereMesh.vertices = v;
@@ -340,27 +269,17 @@ public class PlanetGenerator : MonoBehaviour
         atmosphereMesh.RecalculateNormals();
         atmosphereMesh.RecalculateBounds();
 
-        // --- ADDED DEBUGGING CODE ---
-        Debug.Log($"Atmosphere Mesh Vertices for '{atmosphereGameObject.name}' (first 5):");
-        for (int i = 0; i < Mathf.Min(5, v.Length); i++)
-        {
-            Debug.Log($"  Vertex {i}: {v[i]}");
-        }
-        Debug.Log($"Atmosphere Mesh Bounds Center: {atmosphereMesh.bounds.center}");
-        Debug.Log($"Atmosphere Mesh Bounds Extents: {atmosphereMesh.bounds.extents}");
-        // --- END ADDED DEBUGGING CODE ---
-
-
-        // Ensure atmosphereMeshRenderer and atmosphereMaterial are not null before assigning
         if (atmosphereMeshRenderer != null && colorSettings.atmosphereMaterial != null)
         {
             atmosphereMeshRenderer.sharedMaterial = colorSettings.atmosphereMaterial;
 
-            // Check if sceneSunLight is assigned, otherwise try to find it
+#if UNITY_2023_1_OR_NEWER
             if (sceneSunLight == null)
-                sceneSunLight = GameObject.FindFirstObjectByType<Light>();
-
-            // Assign properties to the atmosphereController
+                sceneSunLight = Object.FindFirstObjectByType<Light>();
+#else
+            if (sceneSunLight == null)
+                sceneSunLight = FindObjectOfType<Light>();
+#endif
             atmosphereController.sunLight = sceneSunLight;
             atmosphereController.atmosphereMaterial = colorSettings.atmosphereMaterial;
             atmosphereController.atmosphereRadius = atmosphereRadius;
@@ -370,22 +289,17 @@ public class PlanetGenerator : MonoBehaviour
             atmosphereController.ambientLightInfluence = colorSettings.atmosphereAmbientLightInfluence;
             atmosphereController.rimPower = colorSettings.atmosphereRimPower;
         }
-        else if (atmosphereMeshRenderer == null)
-        {
-            Debug.LogError("PlanetGenerator: AtmosphereMeshRenderer is null, cannot apply atmosphere material. Ensure it's on the GameObject.", this);
-        }
-        else if (colorSettings.atmosphereMaterial == null)
-        {
-            Debug.LogError("PlanetGenerator: colorSettings.atmosphereMaterial is null, cannot apply to atmosphere mesh. Assign it in ColorSettings asset.", this);
-        }
+
+        Debug.Log($"Atmosphere Transform - Position: {atmosphereGameObject.transform.position}, Rotation: {atmosphereGameObject.transform.rotation.eulerAngles}, Scale: {atmosphereGameObject.transform.localScale}");
     }
 
-    void UpdateBiomeTexture()
+    Texture2D UpdateBiomeTexture()
     {
-        if (colorSettings.biomes == null || colorSettings.biomes.Length == 0) return;
+        if (colorSettings.biomes == null || colorSettings.biomes.Length == 0)
+            return null;
 
         int texRes = 256;
-        biomeTexture = new Texture2D(texRes, 1, TextureFormat.RGBA32, false)
+        Texture2D texture = new Texture2D(texRes, 1, TextureFormat.RGBA32, false)
         {
             filterMode = FilterMode.Bilinear,
             wrapMode = TextureWrapMode.Clamp
@@ -408,15 +322,16 @@ public class PlanetGenerator : MonoBehaviour
             pixels[i] = col;
         }
 
-        biomeTexture.SetPixels(pixels);
-        biomeTexture.Apply();
+        texture.SetPixels(pixels);
+        texture.Apply();
+
+        return texture;
     }
 
     void OnDestroy()
     {
         if (biomeTexture != null) DestroyImmediate(biomeTexture);
-        // Using `!= null` check for GameObject references that might have been destroyed by scene unload
-        if (oceanGameObject) DestroyImmediate(oceanGameObject);
-        if (atmosphereGameObject) DestroyImmediate(atmosphereGameObject);
+        if (oceanGameObject != null) DestroyImmediate(oceanGameObject);
+        if (atmosphereGameObject != null) DestroyImmediate(atmosphereGameObject);
     }
 }
